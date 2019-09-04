@@ -180,7 +180,7 @@ typedef NS_ENUM(NSInteger, WXErrorCode) {//error.code
  *
  *  @return A block that takes a CGPoint argument, which is content offset of the scroller
  **/
-@property (nonatomic, copy) void (^onScroll)(CGPoint contentOffset);
+@property (nonatomic, copy) void (^onScroll)(CGPoint contentOffset, UIScrollView *scrollerView);
 
 /**
  * the callback to be run repeatedly while the instance is rendering.

@@ -88,6 +88,7 @@
              }];
         }
         
+        _playerViewController.view.backgroundColor = [UIColor clearColor];
         [self addSubview:_playerViewController.view];
     }
     return self;

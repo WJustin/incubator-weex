@@ -407,7 +407,7 @@ WX_EXPORT_METHOD(@selector(save:))
             strongSelf.imageDownloadFinish = YES;
             if (error) {
                 // log error message for error
-                WXLogError(@"Error downloading image: %@, detail:%@", imageURL.absoluteString, [error localizedDescription]);
+//                WXLogError(@"Error downloading image: %@, detail:%@", imageURL.absoluteString, [error localizedDescription]);
                 
                 // retry set placeholder, maybe placeholer image can be downloaded
                 if (strongSelf.placeholdSrc) {
@@ -469,7 +469,7 @@ WX_EXPORT_METHOD(@selector(save:))
 
             void(^downloadFailed)(NSString *, NSError *) = ^void(NSString *url, NSError *error) {
                 weakSelf.imageDownloadFinish = YES;
-                WXLogError(@"Error downloading image: %@, detail:%@", url, [error localizedDescription]);
+//                WXLogError(@"Error downloading image: %@, detail:%@", url, [error localizedDescription]);
             };
 
             [strongSelf updatePlaceHolderWithFailedBlock:downloadFailed];
@@ -534,7 +534,7 @@ WX_EXPORT_METHOD(@selector(save:))
 {
     NSString *imageSrc = [NSString stringWithFormat:@"%@", self.imageSrc?:@""];
     if ([WXUtility isBlankString:imageSrc]) {
-        WXLogError(@"image src is empty");
+        WXLogWarning(@"image src is empty");
         return;
     }
     

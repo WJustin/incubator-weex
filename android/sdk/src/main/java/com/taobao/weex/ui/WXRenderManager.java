@@ -18,6 +18,7 @@
  */
 package com.taobao.weex.ui;
 
+import android.opengl.GLES10;
 import android.support.annotation.Nullable;
 import android.support.annotation.RestrictTo;
 import android.support.annotation.RestrictTo.Scope;
@@ -33,6 +34,7 @@ import com.taobao.weex.ui.action.BasicGraphicAction;
 import com.taobao.weex.ui.action.GraphicActionBatchAction;
 import com.taobao.weex.ui.component.WXComponent;
 import com.taobao.weex.utils.WXExceptionUtils;
+import com.taobao.weex.utils.WXLogUtils;
 import com.taobao.weex.utils.WXUtils;
 
 import java.util.ArrayList;
@@ -40,6 +42,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import javax.microedition.khronos.egl.EGL10;
+import javax.microedition.khronos.egl.EGLConfig;
+import javax.microedition.khronos.egl.EGLContext;
+import javax.microedition.khronos.egl.EGLDisplay;
+import javax.microedition.khronos.egl.EGLSurface;
+
+
 
 /**
  * Manager class for render operation, mainly for managing {@link RenderContextImpl}.
@@ -49,10 +59,12 @@ public class WXRenderManager {
 
   private volatile ConcurrentHashMap<String, RenderContextImpl> mRenderContext;
   private WXRenderHandler mWXRenderHandler;
+  private String mCurrentBatchInstanceId = null;
   private ArrayList<Map<String,Object>> mBatchActions = new ArrayList<>();
   private final int MAX_DROP_FRAME_NATIVE_BATCH = 2000;
   private final static  String sKeyAction = "Action";
   private static int nativeBatchTimes = 0;
+  private static int mOpenGLRenderLimitValue = 0;
 
   public WXRenderManager() {
     mRenderContext = new ConcurrentHashMap<>();
@@ -79,6 +91,56 @@ public class WXRenderManager {
     }
     return statement.getWXSDKInstance();
   }
+
+    public static int getOpenGLRenderLimitValue() {
+      if(mOpenGLRenderLimitValue == 0){
+          int maxsize = 0;
+              try {
+                  EGL10 egl = (EGL10) EGLContext.getEGL();
+                  EGLDisplay dpy = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
+                  int[] vers = new int[2];
+                  egl.eglInitialize(dpy, vers);
+                  int[] configAttr = {
+                          EGL10.EGL_COLOR_BUFFER_TYPE, EGL10.EGL_RGB_BUFFER,
+                          EGL10.EGL_LEVEL, 0,
+                          EGL10.EGL_SURFACE_TYPE, EGL10.EGL_PBUFFER_BIT,
+                          EGL10.EGL_NONE};
+                  EGLConfig[] configs = new EGLConfig[1];
+                  int[] numConfig = new int[1];
+                  egl.eglChooseConfig(dpy, configAttr, configs, 1, numConfig);
+                  if(numConfig[0] == 0){
+                      //There is something wrong with opengl environment.
+                      maxsize = -1;
+                      egl.eglTerminate(dpy);
+                  }else {
+                      EGLConfig config = configs[0];
+                      int[] surfAttr = {
+                              EGL10.EGL_WIDTH, 64,
+                              EGL10.EGL_HEIGHT, 64,
+                              EGL10.EGL_NONE};
+                      EGLSurface surf = egl.eglCreatePbufferSurface(dpy, config, surfAttr);
+                      final int EGL_CONTEXT_CLIENT_VERSION = 0x3098;// missing in EGL10
+                      int[] ctxAttrib = {
+                              EGL_CONTEXT_CLIENT_VERSION, 1,
+                              EGL10.EGL_NONE};
+                      EGLContext ctx = egl.eglCreateContext(dpy, config, EGL10.EGL_NO_CONTEXT, ctxAttrib);
+                      egl.eglMakeCurrent(dpy, surf, surf, ctx);
+                      int[] maxSize = new int[1];
+                      GLES10.glGetIntegerv(GLES10.GL_MAX_TEXTURE_SIZE, maxSize, 0);
+                      egl.eglMakeCurrent(dpy, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE,
+                              EGL10.EGL_NO_CONTEXT);
+                      egl.eglDestroySurface(dpy, surf);
+                      egl.eglDestroyContext(dpy, ctx);
+                      egl.eglTerminate(dpy);
+                      maxsize = maxSize[0];
+                  }
+              } catch(Exception e){
+                  WXLogUtils.e(WXLogUtils.getStackTrace(e));
+              }
+          mOpenGLRenderLimitValue = maxsize;
+      }
+      return mOpenGLRenderLimitValue;
+    }
 
   @RestrictTo(Scope.LIBRARY)
   public void postOnUiThread(Runnable runnable, long delayMillis) {
@@ -123,18 +185,38 @@ public class WXRenderManager {
   }
 
   private void postAllStashedGraphicAction(final String instanceId,final BasicGraphicAction action) {
-      ArrayList<Map<String, Object>> tmpList = new ArrayList<>(mBatchActions);
+      final RenderContextImpl renderContext = mRenderContext.get(instanceId);
+
+      /// keep actions if renderContext still exist
+      ArrayList<Map<String, Object>> tmpList = null;
+      if (renderContext != null) {
+        tmpList = new ArrayList<>(mBatchActions);
+      }
+
+      // clear stashed actions
       this.mBatchActions.clear();
+      mCurrentBatchInstanceId = null;
+      nativeBatchTimes = 0;
+
+      // return if renderContext has been destroyed
+      if (renderContext == null) {
+        return;
+      }
+
+      /// post actions if renderContext still exist
       ArrayList<BasicGraphicAction> actions = new ArrayList<>(tmpList.size());
       for (int i = 0 ; i < tmpList.size(); i ++) {
           Map<String, Object> item = tmpList.get(i);
-          BasicGraphicAction tmpAction = (BasicGraphicAction)item.get(sKeyAction);
+          Object mustBeAction = item.get(sKeyAction);
+          if (!(mustBeAction instanceof BasicGraphicAction)) {
+            continue;
+          }
+          BasicGraphicAction tmpAction = (BasicGraphicAction)mustBeAction;
           if (tmpAction.mActionType == BasicGraphicAction.ActionTypeBatchBegin || tmpAction.mActionType == BasicGraphicAction.ActionTypeBatchEnd) {
-              continue;
+            continue;
           }
           actions.add(tmpAction);
       }
-      nativeBatchTimes = 0;
       postGraphicAction(instanceId, new GraphicActionBatchAction(action.getWXSDKIntance(),action.getRef(), actions));
   }
 
@@ -142,6 +224,17 @@ public class WXRenderManager {
     final RenderContextImpl renderContext = mRenderContext.get(instanceId);
     if (renderContext == null) {
       return;
+    }
+
+    // If more than two pages exist and mCurrentBatchInstanceId not matches new instanceId, we will post all stashed actions at once.
+    // That will cause losing efficacy of batch action, but it is acceptable because it's not serious problem.
+    if (mCurrentBatchInstanceId != null && instanceId != null && !mCurrentBatchInstanceId.equals(instanceId) && mBatchActions.size() > 0) {
+      Map<String, Object> lastItem = mBatchActions.get(mBatchActions.size() - 1);
+      Object mustBeAction = lastItem.get(sKeyAction);
+      if (mustBeAction instanceof BasicGraphicAction) {
+        BasicGraphicAction lastAction = (BasicGraphicAction)mustBeAction;
+        postAllStashedGraphicAction(mCurrentBatchInstanceId, lastAction);
+      }
     }
 
     if (action.mActionType == BasicGraphicAction.ActionTypeBatchEnd) {
@@ -155,6 +248,7 @@ public class WXRenderManager {
             HashMap<String, Object> item = new HashMap<>(1);
             item.put(sKeyAction, action);
             mBatchActions.add(item);
+            mCurrentBatchInstanceId = instanceId;
             return;
         }
     }

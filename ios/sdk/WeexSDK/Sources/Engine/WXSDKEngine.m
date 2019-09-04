@@ -41,6 +41,7 @@
 #import "WXExceptionUtils.h"
 #import "WXConfigCenterProtocol.h"
 #import "WXComponent+Layout.h"
+#import "WXCoreBridge.h"
 
 @implementation WXSDKEngine
 
@@ -66,6 +67,7 @@
     [self registerModule:@"meta" withClass:NSClassFromString(@"WXMetaModule")];
     [self registerModule:@"webSocket" withClass:NSClassFromString(@"WXWebSocketModule")];
     [self registerModule:@"voice-over" withClass:NSClassFromString(@"WXVoiceOverModule")];
+    [self registerModule:@"sdk-console-log" withClass:NSClassFromString(@"WXConsoleLogModule")];
 }
 
 + (void)registerModule:(NSString *)name withClass:(Class)clazz
@@ -100,6 +102,8 @@
     [self registerComponent:@"div" withClass:NSClassFromString(@"WXComponent") withProperties:nil];
     [self registerComponent:@"text" withClass:NSClassFromString(@"WXTextComponent") withProperties:nil];
     [self registerComponent:@"image" withClass:NSClassFromString(@"WXImageComponent") withProperties:nil];
+    [self registerComponent:@"richtext" withClass:NSClassFromString(@"WXRichText") withProperties:nil];
+    
     [self registerComponent:@"scroller" withClass:NSClassFromString(@"WXScrollerComponent") withProperties:nil];
     [self registerComponent:@"list" withClass:NSClassFromString(@"WXListComponent") withProperties:nil];
     [self registerComponent:@"recycler" withClass:NSClassFromString(@"WXRecyclerComponent") withProperties:nil];
@@ -222,15 +226,6 @@
 + (void)initSDKEnvironment
 {
     NSString *fileName = @"weex-main-jsfm";
-    [WXSDKManager sharedInstance].multiContext = YES;
-    
-    if ([[NSUserDefaults standardUserDefaults] objectForKey:@"createInstanceUsingMutliContext"]) {
-        BOOL createInstanceUsingMutliContext = [[[NSUserDefaults standardUserDefaults] objectForKey:@"createInstanceUsingMutliContext"] boolValue];
-        if (!createInstanceUsingMutliContext) {
-            fileName = @"native-bundle-main";
-            [WXSDKManager sharedInstance].multiContext = NO;
-        }
-    }
     NSString *filePath = [[NSBundle bundleForClass:self] pathForResource:fileName ofType:@"js"];
 	if (filePath == nil) {
 		filePath = [[NSBundle mainBundle] pathForResource:fileName ofType:@"js"];
@@ -289,10 +284,20 @@
 {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        [self _loadRenderPlugins];
         [self _registerDefaultComponents];
         [self _registerDefaultModules];
         [self _registerDefaultHandlers];
     });
+}
+
++ (void)_loadRenderPlugins
+{
+    // Load agil render
+    Class agilRender = NSClassFromString(@"WXAgilRender");
+    if (agilRender) {
+        [agilRender initialize];
+    }
 }
 
 + (NSString*)SDKEngineVersion
@@ -306,15 +311,21 @@
 }
 
 
-static NSDictionary *_customEnvironment;
+static NSDictionary *_customEnvironment = nil;
 + (void)setCustomEnvironment:(NSDictionary *)environment
 {
-    _customEnvironment = environment;
+    @synchronized (self) {
+        _customEnvironment = [environment copy];
+    }
 }
 
 + (NSDictionary *)customEnvironment
 {
-    return _customEnvironment;
+    NSDictionary* result = nil;
+    @synchronized (self) {
+        result = [_customEnvironment copy];
+    }
+    return result;
 }
 
 # pragma mark Debug
@@ -328,14 +339,6 @@ static NSDictionary *_customEnvironment;
 + (void)restart
 {
     NSString *fileName = @"weex-main-jsfm";
-    [WXSDKManager sharedInstance].multiContext = YES;
-    if ([[NSUserDefaults standardUserDefaults] objectForKey:@"createInstanceUsingMutliContext"]) {
-        BOOL createInstanceUsingMutliContext = [[[NSUserDefaults standardUserDefaults] objectForKey:@"createInstanceUsingMutliContext"] boolValue];
-        if (!createInstanceUsingMutliContext) {
-            fileName = @"native-bundle-main";
-            [WXSDKManager sharedInstance].multiContext = NO;
-        }
-    }
     NSString *filePath = [[NSBundle bundleForClass:self] pathForResource:fileName ofType:@"js"];
 	if (filePath == nil) {
 		filePath = [[NSBundle mainBundle] pathForResource:fileName ofType:@"js"];
@@ -376,6 +379,16 @@ static NSDictionary *_customEnvironment;
 + (void)connectDevToolServer:(NSString *)URL
 {
     [[WXSDKManager bridgeMgr] connectToDevToolWithUrl:[NSURL URLWithString:URL]];
+}
+
++ (void)setGlobalDeviceSize:(CGSize)size
+{
+    [WXCoreBridge setDeviceSize:size];
+}
+
++ (CGSize)getGlobalDeviceSize
+{
+    return [WXCoreBridge getDeviceSize];
 }
 
 + (void)_originalRegisterComponents:(NSDictionary *)components {

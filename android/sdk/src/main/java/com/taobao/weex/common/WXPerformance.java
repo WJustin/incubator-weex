@@ -145,8 +145,8 @@ public class WXPerformance {
   @RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
   public static final String CACHE_TYPE = "cacheType";
 
-  public static final int VIEW_LIMIT_HEIGHT = WXViewUtils.getScreenHeight() / 2;
-  public static final int VIEW_LIMIT_WIDTH = WXViewUtils.getScreenWidth() / 2;
+  public static final int VIEW_LIMIT_HEIGHT = WXViewUtils.getScreenHeight() /3*2;
+  public static final int VIEW_LIMIT_WIDTH = WXViewUtils.getScreenWidth() /3*2;
   public static boolean TRACE_DATA = WXEnvironment.isApkDebugable();
 
   /**
@@ -174,6 +174,8 @@ public class WXPerformance {
   public long callCreateFinishTime;
 
   public long interactionTime;
+
+  public long interactionRealUnixTime;
 
   public int interactionViewAddCount;
 

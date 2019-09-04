@@ -120,7 +120,9 @@ public class Constants {
     String AUTO_RECYCLE = "autoBitmapRecycle";
     String SHOW_INDICATORS = "showIndicators";
     String AUTO_PLAY = "autoPlay";
+    String AUTOPLAY = "autoplay";
     String CONTROLS = "controls";
+    String ZORDERTOP = "zOrderTop";
     String SCROLL_DIRECTION = "scrollDirection";
     String SCOPE = "scope";
     String RECYCLE = "recycle";
@@ -145,6 +147,7 @@ public class Constants {
     String MAXLENGTH = "maxlength";
     String ROWS = "rows";
     String CHECKED = "checked";
+    String ANIMATING = "animating";
     String VISIBILITY = "visibility";
     String ITEM_COLOR = "itemColor";
     String ITEM_SELECTED_COLOR = "itemSelectedColor";
@@ -178,6 +181,7 @@ public class Constants {
     String OFFSET_ACCURACY = "offsetAccuracy";
     String CONTENT_SIZE = "contentSize";
     String CONTENT_OFFSET = "contentOffset";
+    String ISDRAGGING = "isDragging";
     String X = "x";
     String Y = "y";
     String RETURN_KEY_TYPE = "returnKeyType";

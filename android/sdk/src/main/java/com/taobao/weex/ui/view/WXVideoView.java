@@ -64,6 +64,7 @@ public class WXVideoView extends VideoView implements WXGestureObservable {
     mVideoPauseListener = listener;
   }
 
+  @SuppressLint("ClickableViewAccessibility")
   @Override
   public boolean onTouchEvent(MotionEvent event) {
     boolean result = super.onTouchEvent(event);
@@ -265,6 +266,7 @@ public class WXVideoView extends VideoView implements WXGestureObservable {
       }
       mMediaController = controller;
       mVideoView = video;
+      mVideoView.setZOrderOnTop(true);
 
       if(mUri != null) {
         setVideoURI(mUri);

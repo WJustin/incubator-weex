@@ -18,6 +18,7 @@
  */
 package com.taobao.weex.bridge;
 
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
@@ -34,10 +35,13 @@ import com.taobao.weex.common.WXRenderStrategy;
 import com.taobao.weex.dom.CSSShorthand;
 import com.taobao.weex.layout.ContentBoxMeasurement;
 import com.taobao.weex.performance.WXInstanceApm;
+import com.taobao.weex.performance.WXStateRecord;
 import com.taobao.weex.utils.WXExceptionUtils;
+import com.taobao.weex.utils.WXJsonUtils;
 import com.taobao.weex.utils.WXLogUtils;
 import com.taobao.weex.utils.WXUtils;
 import com.taobao.weex.utils.WXWsonJSONSwitch;
+import com.taobao.weex.utils.tools.TimeCalculator;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -48,7 +52,7 @@ import java.util.Map;
  * Communication interface for Java code and JavaScript code.
  */
 
-public class WXBridge implements IWXBridge {
+    public class WXBridge implements IWXBridge {
 
   private native int nativeInitFrameworkEnv(String framework, WXParams params, String cacheDir, boolean pieSupport);
 
@@ -69,9 +73,13 @@ public class WXBridge implements IWXBridge {
 
   public native String nativeExecJSOnInstance(String instanceId, String script, int type);
 
-  public native void nativeFireEventOnDataRenderNode(String instanceId, String ref, String type, String data);
+  public native void nativeFireEventOnDataRenderNode(String instanceId, String ref, String type, String data, String domChanges);
+
+  public native void nativeInvokeCallbackOnDataRender(String instanceId, String callbackId, String data, boolean keepAlive);
 
   public native void nativeRegisterModuleOnDataRenderNode( String data);
+
+  public native void nativeRegisterComponentOnDataRenderNode( String data);
 
   private native void nativeTakeHeapSnapshot(String filename);
 
@@ -103,9 +111,24 @@ public class WXBridge implements IWXBridge {
 
   private native void nativeMarkDirty(String instanceId, String ref, boolean dirty);
 
+  private native void nativeSetDeviceDisplay(String instanceId, float width, float height, float scale);
+
   private native void nativeRegisterCoreEnv(String key, String value);
 
   private native void nativeResetWXBridge(Object bridge, String className);
+
+  private native void nativeSetInstanceRenderType(String instanceId, String renderType);
+
+  private native void nativeRemoveInstanceRenderType(String instanceId);
+
+  private native void nativeSetPageArgument(String instanceId, String key, String value);
+
+  public native void nativeOnInteractionTimeUpdate(String instanceId);
+
+  /**
+   * Update Init Framework Params
+   * */
+  private native void nativeUpdateInitFrameworkParams(String key, String value, String desc);
 
   /**
    * update global config,
@@ -113,7 +136,27 @@ public class WXBridge implements IWXBridge {
    * */
   public native void nativeUpdateGlobalConfig(String config);
 
+  private native void nativeSetViewPortWidth(String instanceId, float viewPortWidth);
+  private native void nativeSetLogType(float type, float isPerf);
+
+  private native void nativeReloadPageLayout(String instanceId);
+
+  private native void nativeSetDeviceDisplayOfPage(String instanceId,float width,float height);
+
   public static final boolean MULTIPROCESS = true;
+
+
+  @Override
+  public void updateInitFrameworkParams(String key, String value, String desc){
+    WXStateRecord.getInstance().recordAction("","updateInitFrameworkParams:");
+     nativeUpdateInitFrameworkParams(key, value, desc);
+  }
+
+  @Override
+  public void setLogType(float type, boolean isPerf) {
+    Log.e("WeexCore", "setLog" + WXEnvironment.sLogLevel.getValue() + "isPerf : " + isPerf);
+    nativeSetLogType(type, isPerf ? 1 : 0);
+  }
 
   @Override
   public int initFramework(String framework, WXParams params) {
@@ -123,24 +166,29 @@ public class WXBridge implements IWXBridge {
   @Override
   public int initFrameworkEnv(String framework, WXParams params, String cacheDir, boolean pieSupport) {
     if (MULTIPROCESS) {
+      WXStateRecord.getInstance().recordAction("","nativeInitFrameworkEnv:");
       return nativeInitFrameworkEnv(framework, params, cacheDir, pieSupport);
     } else {
+      WXStateRecord.getInstance().recordAction("","nativeInitFramework:");
       return nativeInitFramework(framework, params);
     }
   }
 
   @Override
   public void refreshInstance(String instanceId, String namespace, String function, WXJSObject[] args) {
+    WXStateRecord.getInstance().recordAction(instanceId,"refreshInstance:"+namespace+","+function);
     nativeRefreshInstance(instanceId, namespace, function, args);
   }
 
   @Override
   public int execJS(String instanceId, String namespace, String function, WXJSObject[] args) {
+    WXStateRecord.getInstance().recordAction(instanceId,"execJS:"+namespace+","+function);
     return nativeExecJS(instanceId, namespace, function, args);
   }
 
   @Override
   public void execJSWithCallback(String instanceId, String namespace, String function, WXJSObject[] args, ResultCallback callback) {
+    WXStateRecord.getInstance().recordAction(instanceId,"execJSWithCallback:"+namespace+","+function);
     if (callback == null) {
       execJS(instanceId, namespace, function, args);
     }
@@ -148,9 +196,22 @@ public class WXBridge implements IWXBridge {
             ResultCallbackManager.generateCallbackId(callback));
   }
 
+  @CalledByNative
+  public void onNativePerformanceDataUpdate(String instanceId,Map<String,String> map){
+    if (TextUtils.isEmpty(instanceId) || null == map || map.size() < 1){
+      return;
+    }
+    WXSDKInstance instance = WXSDKManager.getInstance().getAllInstanceMap().get(instanceId);
+    if (null == instance || null == instance.getApmForInstance()){
+      return;
+    }
+    instance.getApmForInstance().updateNativePerformanceData(map);
+  }
+
   // Result from js engine
   @CalledByNative
   public void onReceivedResult(long callbackId, byte[] result) {
+    WXStateRecord.getInstance().recordAction("onReceivedResult","callbackId"+callbackId);
     ResultCallback callback = ResultCallbackManager.removeCallbackById(callbackId);
     if (callback != null) {
        callback.onReceiveResult(result);
@@ -159,6 +220,7 @@ public class WXBridge implements IWXBridge {
 
   @Override
   public int execJSService(String javascript) {
+    WXStateRecord.getInstance().recordAction("execJSService","execJSService:");
     return nativeExecJSService(javascript);
   }
 
@@ -170,16 +232,20 @@ public class WXBridge implements IWXBridge {
 
   @Override
   public int createInstanceContext(String instanceId, String name, String function, WXJSObject[] args) {
+    Log.e(TimeCalculator.TIMELINE_TAG,"createInstance :" + System.currentTimeMillis());
+    WXStateRecord.getInstance().recordAction(instanceId,"createInstanceContext:");
     return nativeCreateInstanceContext(instanceId, name, function, args);
   }
 
   @Override
   public int destoryInstance(String instanceId, String name, String function, WXJSObject[] args) {
+    WXStateRecord.getInstance().recordAction(instanceId,"destoryInstance:");
     return nativeDestoryInstance(instanceId, name, function, args);
   }
 
   @Override
   public String execJSOnInstance(String instanceId, String script, int type) {
+    WXStateRecord.getInstance().recordAction(instanceId,"execJSOnInstance:"+type);
     return nativeExecJSOnInstance(instanceId, script, type);
   }
 
@@ -194,6 +260,15 @@ public class WXBridge implements IWXBridge {
    */
   @CalledByNative
   public int callNative(String instanceId, byte[] tasks, String callback) {
+    if("HeartBeat".equals(callback)) {
+      Log.e("HeartBeat instanceId", instanceId);
+      WXSDKInstance sdkInstance = WXSDKManager.getInstance().getSDKInstance(instanceId);
+      if(sdkInstance != null) {
+        sdkInstance.createInstanceFuncHeartBeat();
+      }
+      return IWXBridge.INSTANCE_RENDERING;
+    }
+
     return callNative(instanceId, (JSONArray) JSON.parseArray(new String(tasks)), callback);
   }
 
@@ -202,7 +277,7 @@ public class WXBridge implements IWXBridge {
     try{
       return callNative(instanceId, JSONArray.parseArray(tasks), callback);
     }catch (Exception e){
-      WXLogUtils.e(TAG, "callNative throw exception: " + e.getMessage());
+      WXLogUtils.e(TAG, "callNative throw exception: " + WXLogUtils.getStackTrace(e));
       return IWXBridge.INSTANCE_RENDERING;
     }
   }
@@ -217,7 +292,7 @@ public class WXBridge implements IWXBridge {
     try {
       errorCode = WXBridgeManager.getInstance().callNative(instanceId, tasks, callback);
     } catch (Throwable e) {
-      WXLogUtils.e(TAG, "callNative throw exception:" + e.getMessage());
+      WXLogUtils.e(TAG, "callNative throw exception:" + WXLogUtils.getStackTrace(e));
     }
 
     if (WXEnvironment.isApkDebugable()) {
@@ -249,6 +324,7 @@ public class WXBridge implements IWXBridge {
   @CalledByNative
   public Object callNativeModule(String instanceId, String module, String method, byte[] arguments, byte[] options) {
     try {
+      WXStateRecord.getInstance().recordAction(instanceId,"callNativeModule:"+module+"."+method);
       long start = WXUtils.getFixUnixTime();
       WXSDKInstance instance = WXSDKManager.getInstance().getSDKInstance(instanceId);
       JSONArray argArray = null;
@@ -256,7 +332,12 @@ public class WXBridge implements IWXBridge {
         // TODO use a better way
         if (instance!=null && (instance.getRenderStrategy()== WXRenderStrategy.DATA_RENDER
                 || instance.getRenderStrategy()== WXRenderStrategy.DATA_RENDER_BINARY)){
-          argArray = (JSONArray) JSON.parse(new String(arguments, "UTF-8"));
+          try {
+            argArray = (JSONArray) JSON.parse(new String(arguments, "UTF-8"));
+          } catch (Exception e) {
+            // For wson use in data render mode
+            argArray = (JSONArray) WXWsonJSONSwitch.parseWsonOrJSON(arguments);
+          }
         } else {
           argArray = (JSONArray) WXWsonJSONSwitch.parseWsonOrJSON(arguments);
         }
@@ -291,7 +372,23 @@ public class WXBridge implements IWXBridge {
             WXUtils.getFixUnixTime()-start
         );
       }
-      return WXWsonJSONSwitch.toWsonOrJsonWXJSObject(object);
+      if (instance!=null && (instance.getRenderStrategy()== WXRenderStrategy.DATA_RENDER
+          || instance.getRenderStrategy()== WXRenderStrategy.DATA_RENDER_BINARY)){
+        try {
+          if(object == null){
+            return new WXJSObject(null);
+          }
+          if(object.getClass() == WXJSObject.class){
+            return (WXJSObject) object;
+          }
+          return new WXJSObject(WXJSObject.JSON, WXJsonUtils.fromObjectToJSONString(object));
+        } catch (Exception e) {
+          // For wson use in data render mode
+          return WXWsonJSONSwitch.toWsonOrJsonWXJSObject(object);
+        }
+      } else {
+        return WXWsonJSONSwitch.toWsonOrJsonWXJSObject(object);
+      }
     }catch (Exception e){
       WXLogUtils.e(TAG,  e);
       return new WXJSObject(null);
@@ -310,8 +407,24 @@ public class WXBridge implements IWXBridge {
   @Override
   @CalledByNative
   public void callNativeComponent(String instanceId, String ref, String method, byte[] arguments, byte[] optionsData) {
+    WXStateRecord.getInstance().recordAction(instanceId,"callNativeComponent:"+method);
     try{
-      JSONArray argArray = (JSONArray) WXWsonJSONSwitch.parseWsonOrJSON(arguments);
+      WXSDKInstance instance = WXSDKManager.getInstance().getSDKInstance(instanceId);
+      JSONArray argArray = null;
+      if (arguments != null){
+        // TODO use a better way
+        if (instance!=null && (instance.getRenderStrategy()== WXRenderStrategy.DATA_RENDER
+            || instance.getRenderStrategy()== WXRenderStrategy.DATA_RENDER_BINARY)){
+          try {
+            argArray = (JSONArray) JSON.parse(new String(arguments, "UTF-8"));
+          } catch (Exception e) {
+            // For wson use in data render mode
+            argArray = (JSONArray) WXWsonJSONSwitch.parseWsonOrJSON(arguments);
+          }
+        } else {
+          argArray = (JSONArray) WXWsonJSONSwitch.parseWsonOrJSON(arguments);
+        }
+      }
       Object options = WXWsonJSONSwitch.parseWsonOrJSON(optionsData);
       WXBridgeManager.getInstance().callNativeComponent(instanceId, ref, method, argArray, options);
     }catch (Exception e){
@@ -331,6 +444,7 @@ public class WXBridge implements IWXBridge {
     if (version != null) {
       WXEnvironment.JS_LIB_SDK_VERSION = version;
     }
+    WXStateRecord.getInstance().onJSFMInit();
   }
 
   @Override
@@ -348,7 +462,7 @@ public class WXBridge implements IWXBridge {
     } catch (Throwable e) {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callCreateBody throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callCreateBody throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -363,7 +477,7 @@ public class WXBridge implements IWXBridge {
     } catch (Throwable e) {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callCreateFinish throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callCreateFinish throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -381,7 +495,7 @@ public class WXBridge implements IWXBridge {
     } catch (Throwable e) {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "reloadPageNative throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "reloadPageNative throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
   }
@@ -399,7 +513,7 @@ public class WXBridge implements IWXBridge {
     } catch (Throwable e) {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callCreateBody throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callCreateBody throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -419,7 +533,7 @@ public class WXBridge implements IWXBridge {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
         e.printStackTrace();
-        WXLogUtils.e(TAG, "callAddElement throw error:" + e.getMessage());
+        WXLogUtils.e(TAG, "callAddElement throw error:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -433,7 +547,7 @@ public class WXBridge implements IWXBridge {
       errorCode = WXBridgeManager.getInstance().callRemoveElement(instanceId, ref);
     } catch (Throwable e) {
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callRemoveElement throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callRemoveElement throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -447,7 +561,7 @@ public class WXBridge implements IWXBridge {
       errorCode = WXBridgeManager.getInstance().callMoveElement(instanceId, ref, parentref, index);
     } catch (Throwable e) {
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callMoveElement throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callMoveElement throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -462,7 +576,7 @@ public class WXBridge implements IWXBridge {
     } catch (Throwable e) {
       //catch everything during call native.
       // if(WXEnvironment.isApkDebugable()){
-      WXLogUtils.e(TAG, "callAddEvent throw exception:" + e.getMessage());
+      WXLogUtils.e(TAG, "callAddEvent throw exception:" + WXLogUtils.getStackTrace(e));
       // }
     }
     return errorCode;
@@ -477,7 +591,7 @@ public class WXBridge implements IWXBridge {
     } catch (Throwable e) {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callRemoveEvent throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callRemoveEvent throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -496,7 +610,7 @@ public class WXBridge implements IWXBridge {
     } catch (Throwable e) {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callUpdateStyle throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callUpdateStyle throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -511,7 +625,7 @@ public class WXBridge implements IWXBridge {
     } catch (Throwable e) {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callUpdateAttr throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callUpdateAttr throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -519,14 +633,75 @@ public class WXBridge implements IWXBridge {
 
   @Override
   @CalledByNative
-  public int callLayout(String instanceId, String ref, int top, int bottom, int left, int right, int height, int width, int index) {
+  public int callAddChildToRichtext(String instanceId, String nodeType, String ref, String parentRef, String richTextRef,
+                             HashMap<String, String> styles, HashMap<String, String> attrs){
     int errorCode = IWXBridge.INSTANCE_RENDERING;
     try {
-      errorCode = WXBridgeManager.getInstance().callLayout(instanceId, ref, top, bottom, left, right, height, width, index);
+      errorCode = WXBridgeManager.getInstance().callAddChildToRichtext(instanceId, nodeType, ref, parentRef, richTextRef,
+              styles, attrs);
     } catch (Throwable e) {
       //catch everything during call native.
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callLayout throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callAddChildToRichtext throw exception:" + WXLogUtils.getStackTrace(e));
+      }
+    }
+    return errorCode;
+  }
+  @Override
+  @CalledByNative
+  public int callRemoveChildFromRichtext(String instanceId, String ref, String parentRef, String richTextRef){
+    int errorCode = IWXBridge.INSTANCE_RENDERING;
+    try {
+      errorCode = WXBridgeManager.getInstance().callRemoveChildFromRichtext(instanceId, ref, parentRef, richTextRef);
+    } catch (Throwable e) {
+      //catch everything during call native.
+      if (WXEnvironment.isApkDebugable()) {
+        WXLogUtils.e(TAG, "callRemoveChildFromRichtext throw exception:" + WXLogUtils.getStackTrace(e));
+      }
+    }
+    return errorCode;
+  }
+
+  @Override
+  @CalledByNative
+  public int callUpdateRichtextStyle(String instanceId, String ref, HashMap<String, String> styles, String parentRef, String richTextRef){
+    int errorCode = IWXBridge.INSTANCE_RENDERING;
+    try {
+      errorCode = WXBridgeManager.getInstance().callUpdateRichtextStyle(instanceId, ref, styles, parentRef, richTextRef);
+    } catch (Throwable e) {
+      //catch everything during call native.
+      if (WXEnvironment.isApkDebugable()) {
+        WXLogUtils.e(TAG, "callUpdateRichtextStyle throw exception:" + WXLogUtils.getStackTrace(e));
+      }
+    }
+    return errorCode;
+  }
+  @Override
+  @CalledByNative
+  public int callUpdateRichtextChildAttr(String instanceId, String ref, HashMap<String, String> attrs, String parentRef, String richTextRef){
+    int errorCode = IWXBridge.INSTANCE_RENDERING;
+    try {
+      errorCode = WXBridgeManager.getInstance().callUpdateRichtextChildAttr(instanceId, ref, attrs, parentRef, richTextRef);
+    } catch (Throwable e) {
+      //catch everything during call native.
+      if (WXEnvironment.isApkDebugable()) {
+        WXLogUtils.e(TAG, "callUpdateRichtextChildAttr throw exception:" + WXLogUtils.getStackTrace(e));
+      }
+    }
+    return errorCode;
+  }
+
+
+  @Override
+  @CalledByNative
+  public int callLayout(String instanceId, String ref, int top, int bottom, int left, int right, int height, int width, boolean isRTL, int index) {
+    int errorCode = IWXBridge.INSTANCE_RENDERING;
+    try {
+      errorCode = WXBridgeManager.getInstance().callLayout(instanceId, ref, top, bottom, left, right, height, width, isRTL, index);
+    } catch (Throwable e) {
+      //catch everything during call native.
+      if (WXEnvironment.isApkDebugable()) {
+        WXLogUtils.e(TAG, "callLayout throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -539,7 +714,7 @@ public class WXBridge implements IWXBridge {
     try {
       errorCode = WXBridgeManager.getInstance().callCreateFinish(instanceId);
     } catch (Throwable e) {
-      WXLogUtils.e(TAG, "callCreateFinish throw exception:" + e.getMessage());
+      WXLogUtils.e(TAG, "callCreateFinish throw exception:" + WXLogUtils.getStackTrace(e));
     }
     return errorCode;
   }
@@ -551,7 +726,7 @@ public class WXBridge implements IWXBridge {
     try {
       errorCode = WXBridgeManager.getInstance().callRenderSuccess(instanceId);
     } catch (Throwable e) {
-      WXLogUtils.e(TAG, "callCreateFinish throw exception:" + e.getMessage());
+      WXLogUtils.e(TAG, "callCreateFinish throw exception:" + WXLogUtils.getStackTrace(e));
     }
     return errorCode;
   }
@@ -563,7 +738,7 @@ public class WXBridge implements IWXBridge {
     try {
       errorCode = WXBridgeManager.getInstance().callAppendTreeCreateFinish(instanceId, ref);
     } catch (Throwable e) {
-      WXLogUtils.e(TAG, "callAppendTreeCreateFinish throw exception:" + e.getMessage());
+      WXLogUtils.e(TAG, "callAppendTreeCreateFinish throw exception:" + WXLogUtils.getStackTrace(e));
     }
     return errorCode;
   }
@@ -576,7 +751,7 @@ public class WXBridge implements IWXBridge {
       errorCode = WXBridgeManager.getInstance().callHasTransitionPros(instanceId, ref, styles);
     } catch (Throwable e) {
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "callHasTransitionPros throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "callHasTransitionPros throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return errorCode;
@@ -590,7 +765,7 @@ public class WXBridge implements IWXBridge {
       obj = WXBridgeManager.getInstance().getMeasurementFunc(instanceId, renderObjectPtr);
     } catch (Throwable e) {
       if (WXEnvironment.isApkDebugable()) {
-        WXLogUtils.e(TAG, "getMeasurementFunc throw exception:" + e.getMessage());
+        WXLogUtils.e(TAG, "getMeasurementFunc throw exception:" + WXLogUtils.getStackTrace(e));
       }
     }
     return obj;
@@ -662,8 +837,36 @@ public class WXBridge implements IWXBridge {
   }
 
   @Override
+  public void setDeviceDisplay(String instanceId, float width, float height, float scale) {
+    nativeSetDeviceDisplay(instanceId, width, height, scale);
+  }
+
+  @Override
   public void setStyleHeight(String instanceId, String ref, float value) {
     nativeSetStyleHeight(instanceId, ref, value);
+  }
+
+  @Override
+  public void setInstanceRenderType(String instanceId, String renderType){
+    if(TextUtils.isEmpty(renderType)){
+       return;
+    }
+    nativeSetInstanceRenderType(instanceId, renderType);
+  }
+
+  @Override
+  public void setViewPortWidth(String instanceId,float viewPortWidth){
+    nativeSetViewPortWidth(instanceId,viewPortWidth);
+  }
+
+  @Override
+  public void removeInstanceRenderType(String instanceId){
+      nativeRemoveInstanceRenderType(instanceId);
+  }
+
+  @Override
+  public void setPageArgument(String instanceId, String key, String value){
+      nativeSetPageArgument(instanceId, key, value);
   }
 
   @Override
@@ -681,7 +884,7 @@ public class WXBridge implements IWXBridge {
         params.put(IWXUserTrackAdapter.MONITOR_ERROR_CODE, statusCode);
         params.put(IWXUserTrackAdapter.MONITOR_ARG, "InitFrameworkNativeError");
         params.put(IWXUserTrackAdapter.MONITOR_ERROR_MSG, errorMsg);
-        Log.e("Dyy", "reportNativeInitStatus is running and errorCode is " + statusCode + " And errorMsg is " + errorMsg);
+        WXLogUtils.e("reportNativeInitStatus is running and errorCode is " + statusCode + " And errorMsg is " + errorMsg);
         userTrackAdapter.commit(null, null, IWXUserTrackAdapter.INIT_FRAMEWORK, null, params);
       }
 
@@ -705,12 +908,27 @@ public class WXBridge implements IWXBridge {
     }
   }
 
-  @Override
-  public void fireEventOnDataRenderNode(String instanceId, String ref, String type, String data) {
-    nativeFireEventOnDataRenderNode(instanceId,ref,type,data);
+  public void fireEventOnDataRenderNode(String instanceId, String ref, String type, String data, String domChanges) {
+    nativeFireEventOnDataRenderNode(instanceId,ref,type,data, domChanges);
+  }
+
+  public void invokeCallbackOnDataRender(String instanceId, String callbackId, String data, boolean keepAlive) {
+    nativeInvokeCallbackOnDataRender(instanceId,callbackId,data, keepAlive);
   }
 
   public void registerModuleOnDataRenderNode(String data) {
     nativeRegisterModuleOnDataRenderNode(data);
   }
+
+  public void registerComponentOnDataRenderNode(String data) {
+    nativeRegisterComponentOnDataRenderNode(data);
+  }
+  public void reloadPageLayout(String instanceId){
+    nativeReloadPageLayout(instanceId);
+  }
+
+  public void setDeviceDisplayOfPage(String instanceId, float width, float height){
+    nativeSetDeviceDisplayOfPage(instanceId,width,height);
+  }
+
 }

@@ -71,6 +71,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     NSString * _groupAccessibilityChildren; // voice-over navigation order
     NSString * _testId;// just for auto-test
     
+    BOOL _userInteractionEnabled;
+    BOOL _eventPenetrationEnabled;
     BOOL _accessibilityMagicTapEvent;
     
     /**
@@ -90,6 +92,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     UILongPressGestureRecognizer *_longPressGesture;
     UIPanGestureRecognizer *_panGesture;
     
+    BOOL _cancelsTouchesInView;
+    
     BOOL _listenPanStart;
     BOOL _listenPanMove;
     BOOL _listenPanEnd;
@@ -98,6 +102,7 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     BOOL _listenVerticalPan;
     
     BOOL _listenStopPropagation;
+    BOOL _customEvent;
     NSString *_stopPropagationName;
     WXTouchGestureRecognizer* _touchGesture;
     
@@ -128,6 +133,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     WXBorderStyle _borderRightStyle;
     WXBorderStyle _borderBottomStyle;
     WXBorderStyle _borderLeftStyle;
+    
+    NSInteger _lastBorderRecords; // Records last border drawing
     
     BOOL _isViewTreeIgnored; // Component is added to super, but it is not added to views.
     BOOL _isFixed;
@@ -283,6 +290,7 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
 
 - (void)_buildViewHierarchyLazily;
 
+- (void)_setIsLayoutRTL:(BOOL)isRTL;
 
 - (void)_adjustForRTL;
 

@@ -18,6 +18,7 @@
  */
 package com.taobao.weex.ui.component;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.Intent;
@@ -52,7 +53,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOverlay;
 import android.widget.FrameLayout;
-
 import com.alibaba.fastjson.JSONArray;
 import com.taobao.weex.ComponentObserver;
 import com.taobao.weex.IWXActivityStateListener;
@@ -60,6 +60,7 @@ import com.taobao.weex.WXEnvironment;
 import com.taobao.weex.WXSDKInstance;
 import com.taobao.weex.WXSDKManager;
 import com.taobao.weex.adapter.IWXAccessibilityRoleAdapter;
+import com.taobao.weex.adapter.IWXConfigAdapter;
 import com.taobao.weex.bridge.EventResult;
 import com.taobao.weex.bridge.Invoker;
 import com.taobao.weex.bridge.WXBridgeManager;
@@ -74,10 +75,12 @@ import com.taobao.weex.dom.WXEvent;
 import com.taobao.weex.dom.WXStyle;
 import com.taobao.weex.dom.transition.WXTransition;
 import com.taobao.weex.layout.ContentBoxMeasurement;
+import com.taobao.weex.performance.WXAnalyzerDataTransfer;
 import com.taobao.weex.performance.WXInstanceApm;
 import com.taobao.weex.tracing.Stopwatch;
 import com.taobao.weex.tracing.WXTracing;
 import com.taobao.weex.ui.IFComponentHolder;
+import com.taobao.weex.ui.WXRenderManager;
 import com.taobao.weex.ui.action.BasicComponentData;
 import com.taobao.weex.ui.action.GraphicActionAnimation;
 import com.taobao.weex.ui.action.GraphicActionUpdateStyle;
@@ -88,7 +91,6 @@ import com.taobao.weex.ui.animation.WXAnimationModule;
 import com.taobao.weex.ui.component.basic.WXBasicComponent;
 import com.taobao.weex.ui.component.binding.Statements;
 import com.taobao.weex.ui.component.list.WXCell;
-import com.taobao.weex.ui.component.list.template.jni.NativeRenderLayoutDirection;
 import com.taobao.weex.ui.component.list.template.jni.NativeRenderObjectUtils;
 import com.taobao.weex.ui.component.pesudo.OnActivePseudoListner;
 import com.taobao.weex.ui.component.pesudo.PesudoStatus;
@@ -110,7 +112,6 @@ import com.taobao.weex.utils.WXReflectionUtils;
 import com.taobao.weex.utils.WXResourceUtils;
 import com.taobao.weex.utils.WXUtils;
 import com.taobao.weex.utils.WXViewUtils;
-
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -121,6 +122,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -147,6 +149,7 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
 
   private int mAbsoluteY = 0;
   private int mAbsoluteX = 0;
+  private boolean isLastLayoutDirectionRTL = false;
   @Nullable
   private Set<String> mGestureType;
 
@@ -173,6 +176,11 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
   private String mLastBoxShadowId;
   public int mDeepInComponentTree = 0;
   public boolean mIsAddElementToTree = false;
+  //for fix element case
+  public int interactionAbsoluteX=0,interactionAbsoluteY=0;
+  //for fix slider case :cssLeft is not real left base parent;
+  protected int mChildrensWidth = 0;
+  private boolean mHasAddFocusListener = false;
 
   public WXTracing.TraceInfo mTraceInfo = new WXTracing.TraceInfo();
 
@@ -180,8 +188,9 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
   public static final int TYPE_VIRTUAL = 1;
 
   private boolean waste = false;
+  public boolean isIgnoreInteraction = false;
 
-  private ContentBoxMeasurement contentBoxMeasurement;
+  protected ContentBoxMeasurement contentBoxMeasurement;
   private WXTransition mTransition;
   private GraphicSize mPseudoResetGraphicSize;
   @Nullable
@@ -237,41 +246,13 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
   }
 
 
+  @SuppressLint("RtlHardcoded")
   public void setMarginsSupportRTL(ViewGroup.MarginLayoutParams lp, int left, int top, int right, int bottom) {
       lp.setMargins(left, top, right, bottom);
       if (lp instanceof FrameLayout.LayoutParams) {
           FrameLayout.LayoutParams lp_frameLayout = (FrameLayout.LayoutParams) lp;
           lp_frameLayout.gravity = Gravity.LEFT | Gravity.TOP;
       }
-  }
-
-  public boolean isNativeLayoutRTL() {
-      return NativeRenderObjectUtils.nativeRenderObjectGetLayoutDirectionFromPathNode(this.getRenderObjectPtr()) == NativeRenderLayoutDirection.rtl;
-  }
-
-  public static boolean isLayoutRTL(WXComponent cmp) {
-    if (cmp == null) return false;
-
-    View view = cmp.getHostView();
-    if (ViewCompat.isLayoutDirectionResolved(view)) {
-      return ViewCompat.getLayoutDirection(view) == View.LAYOUT_DIRECTION_RTL;
-    } else if (cmp.getParent() != null){
-      return isLayoutRTL(cmp.getParent());
-    } else {
-      return isLayoutRTL((ViewGroup) view.getParent());
-    }
-  }
-
-  public static boolean isLayoutRTL(ViewGroup viewGroup) {
-    if (viewGroup == null) return false;
-
-    if (ViewCompat.isLayoutDirectionResolved(viewGroup)) {
-      return ViewCompat.getLayoutDirection(viewGroup) == View.LAYOUT_DIRECTION_RTL;
-    } else if (viewGroup.getParent() instanceof ViewGroup) {
-      return isLayoutRTL((ViewGroup) viewGroup.getParent());
-    } else {
-      return false;
-    }
   }
 
   public void updateStyles(WXComponent component) {
@@ -330,6 +311,11 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
     }
   }
 
+
+  public void applyComponentEvents(){
+       applyEvents();
+  }
+
   private void applyEvents() {
     if (getEvents() == null || getEvents().isEmpty())
       return;
@@ -372,7 +358,9 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
       }
       addClickListener(mClickEventListener);
     } else if ((type.equals(Constants.Event.FOCUS) || type.equals(Constants.Event.BLUR))) {
-      addFocusChangeListener(new OnFocusChangeListener() {
+      if (!mHasAddFocusListener){
+        mHasAddFocusListener = true;
+        addFocusChangeListener(new OnFocusChangeListener() {
         @Override
         public void onFocusChange(boolean hasFocus) {
           Map<String, Object> params = new HashMap<>();
@@ -380,6 +368,7 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
           fireEvent(hasFocus ? Constants.Event.FOCUS : Constants.Event.BLUR, params);
         }
       });
+      }
     } else if (needGestureDetector(type)) {
       if (null == view) {
         // wait next time to add.
@@ -532,7 +521,7 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
     void onHostViewClick();
   }
 
-  interface OnFocusChangeListener {
+  public interface OnFocusChangeListener{
     void onFocusChange(boolean hasFocus);
   }
 
@@ -682,7 +671,7 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
         component = this;
       }
       bindComponent(component);
-      setLayout(component);
+      setSafeLayout(component);
       setPadding(component.getPadding(), component.getBorder());
       applyEvents();
     }
@@ -701,7 +690,7 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
 
   public void applyLayoutOnly(){
     if(!isLazy()) {
-      setLayout(this);
+      setSafeLayout(this);
       setPadding(this.getPadding(), this.getBorder());
     }
   }
@@ -922,18 +911,31 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
   /**
    * layout view
    */
-  public void setLayout(WXComponent component) {
+  public void setSafeLayout(WXComponent component) {
     if (TextUtils.isEmpty(component.getComponentType())
             || TextUtils.isEmpty(component.getRef()) || component.getLayoutPosition() == null
             || component.getLayoutSize() == null) {
       return;
     }
+    setLayout(component);
+  }
 
+  /**
+   * layout view
+   */
+  public void setLayout(WXComponent component) {
     setLayoutSize(component.getLayoutSize());
     setLayoutPosition(component.getLayoutPosition());
     setPaddings(component.getPadding());
     setMargins(component.getMargin());
     setBorders(component.getBorder());
+
+    boolean isRTL = component.isLayoutRTL();
+    setIsLayoutRTL(isRTL);
+    if (isRTL != component.isLastLayoutDirectionRTL) {
+      component.isLastLayoutDirectionRTL = isRTL;
+      layoutDirectionDidChanged(isRTL);
+    }
 
     parseAnimation();
 
@@ -976,13 +978,16 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
     if (this instanceof WXCell && realHeight >= WXPerformance.VIEW_LIMIT_HEIGHT && realWidth>=WXPerformance.VIEW_LIMIT_WIDTH){
       mInstance.getApmForInstance().updateDiffStats(WXInstanceApm.KEY_PAGE_STATS_CELL_EXCEED_NUM,1);
       mInstance.getWXPerformance().cellExceedNum++;
+      if (WXAnalyzerDataTransfer.isOpenPerformance){
+        WXAnalyzerDataTransfer.transferPerformance(getInstanceId(),"details",WXInstanceApm.KEY_PAGE_STATS_CELL_EXCEED_NUM,
+            String.format(Locale.ROOT, "cell:[w:%d,h:%d],attrs:%s,styles:%s",realWidth,realHeight,getAttrs(),getStyles())
+        );
+      }
+
     }
 
     mAbsoluteY = (int) (nullParent ? 0 : mParent.getAbsoluteY() + getCSSLayoutTop());
     mAbsoluteX = (int) (nullParent ? 0 : mParent.getAbsoluteX() + getCSSLayoutLeft());
-
-    if (mIsAddElementToTree)
-      mInstance.onChangeElement(this, mAbsoluteY > mInstance.getWeexHeight() + 1);
 
     if (mHost == null) {
       return;
@@ -1032,6 +1037,7 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
       } else {
         setHostLayoutParams(mHost, realWidth, realHeight, realLeft, realRight, realTop, realBottom);
       }
+      recordInteraction(realWidth,realHeight);
       mPreRealWidth = realWidth;
       mPreRealHeight = realHeight;
       mPreRealLeft = realLeft;
@@ -1041,6 +1047,50 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
       // restore box shadow
       updateBoxShadow();
     }
+  }
+
+  /**
+   * layout direction is changed
+   * basic class is a empty implementation
+   * subclass can override this method do some RTL necessary things
+   * such as WXText
+   */
+  protected void layoutDirectionDidChanged(boolean isRTL) {
+
+  }
+
+  private void recordInteraction(int realWidth,int realHeight){
+    if (!mIsAddElementToTree){
+      return;
+    }
+    mIsAddElementToTree = false;
+    if (null == mParent){
+      interactionAbsoluteX = 0;
+      interactionAbsoluteY = 0;
+    }else {
+      float cssTop = getCSSLayoutTop();
+      float cssLeft = getCSSLayoutLeft();
+      interactionAbsoluteX = (int)(this.isFixed() ? cssLeft : mParent.interactionAbsoluteX + mParent.mChildrensWidth + cssLeft);
+      interactionAbsoluteY = (int)(this.isFixed() ? cssTop  : mParent.interactionAbsoluteY + cssTop);
+      //fix for slider impl ,and interactionTime calculate if component is out screen
+      if (WXBasicComponentType.SLIDER.equalsIgnoreCase(mParent.getComponentType()) || WXBasicComponentType.CYCLE_SLIDER.equalsIgnoreCase(mParent.getComponentType())){
+        if (!WXBasicComponentType.INDICATOR.equalsIgnoreCase(getComponentType())){
+          mParent.mChildrensWidth += (int)(realWidth + cssLeft);
+        }
+      }
+    }
+
+    if (null == getInstance().getApmForInstance().instanceRect){
+      getInstance().getApmForInstance().instanceRect = new Rect();
+    }
+    Rect instanceRect = getInstance().getApmForInstance().instanceRect;
+    instanceRect.set(0,0,mInstance.getWeexWidth(),mInstance.getWeexHeight());
+    boolean inScreen =
+          instanceRect.contains(interactionAbsoluteX,interactionAbsoluteY) //leftTop
+              || instanceRect.contains(interactionAbsoluteX+realWidth,interactionAbsoluteY)//rightTop
+              || instanceRect.contains(interactionAbsoluteX,interactionAbsoluteY+realHeight)//leftBottom
+              || instanceRect.contains(interactionAbsoluteX+realWidth,interactionAbsoluteY+realHeight);//rightBottom
+    mInstance.onChangeElement(this,!inScreen);
   }
 
   private void setWidgetParams(Widget widget, FlatGUIContext UIImp, Point rawoffset,
@@ -1477,16 +1527,19 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
     if (TextUtils.isEmpty(type)) {
       return;
     }
-    if (getEvents() == null || mAppendEvents == null || mGestureType == null) {
-      return;
-    }
 
     if (type.equals(Constants.Event.LAYEROVERFLOW))
       removeLayerOverFlowListener(getRef());
 
-    getEvents().remove(type);
-    mAppendEvents.remove(type);//only clean append events, not dom's events.
-    mGestureType.remove(type);
+    if(getEvents() != null){
+      getEvents().remove(type);
+    }
+    if(mAppendEvents != null) {
+      mAppendEvents.remove(type);//only clean append events, not dom's events.
+    }
+    if(mGestureType != null){
+      mGestureType.remove(type);
+    }
     removeEventFromView(type);
   }
 
@@ -1627,6 +1680,7 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
                   new int[]{rippleColor});
           return new RippleDrawable(colorStateList, new ColorDrawable(colorInt), null) {
             @Override
+            @SuppressLint("CanvasSize")
             public void draw(@NonNull Canvas canvas) {
               if (mBackgroundDrawable != null) {
                 Path border = mBackgroundDrawable.getContentPath(new RectF(0, 0, canvas.getWidth(), canvas.getHeight()));
@@ -1651,11 +1705,32 @@ public abstract class WXComponent<T extends View> extends WXBasicComponent imple
       getOrCreateBorder().setImage(shader);
     }
   }
+  private boolean shouldCancelHardwareAccelerate() {
+    IWXConfigAdapter adapter = WXSDKManager.getInstance().getWxConfigAdapter();
+    boolean cancel_hardware_accelerate = true;
+    if (adapter != null) {
+      try {
+        cancel_hardware_accelerate = Boolean.parseBoolean(adapter
+                .getConfig("android_weex_test_gpu",
+                        "cancel_hardware_accelerate",
+                        "true"));
+      }catch (Exception e){
+        WXLogUtils.e(WXLogUtils.getStackTrace(e));
+      }
+      WXLogUtils.i("cancel_hardware_accelerate : " + cancel_hardware_accelerate);
+    }
+    return cancel_hardware_accelerate;
+  }
 
   public void setOpacity(float opacity) {
     if (opacity >= 0 && opacity <= 1 && mHost.getAlpha() != opacity) {
+      int limit = WXRenderManager.getOpenGLRenderLimitValue();
       if (isLayerTypeEnabled()) {
         mHost.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+      }
+      if(isLayerTypeEnabled() && shouldCancelHardwareAccelerate() && limit > 0 && (getLayoutHeight() > limit ||
+              getLayoutWidth() > limit)){
+        mHost.setLayerType(View.LAYER_TYPE_NONE,null);
       }
       mHost.setAlpha(opacity);
     }

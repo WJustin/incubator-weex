@@ -27,6 +27,8 @@
 #import "WXCellComponent.h"
 #import "WXImageComponent.h"
 #import "WXUtility.h"
+#import "WXAnalyzerCenter+Transfer.h"
+#import "WXCoreBridge.h"
 
 @interface WXPerformance()
 @property (nonatomic, assign) bool hasRecordFsRenderTimeByPosition;
@@ -41,36 +43,41 @@
     self.componentCreateTime+=diffTime;
 }
 
+- (void)recordViewCreatePerformance:(double) diffTime {
+    self.viewCreateTime += diffTime;
+}
+
 /** on UI thread **/
 - (void)onViewLoad:(WXComponent *)targetComponent
 {
-    if (targetComponent.hasAdd) {
+    if (targetComponent.hasAdd || targetComponent.ignoreInteraction) {
         return;
     }
     targetComponent.hasAdd = true;
     double modifyTime =  CACurrentMediaTime()*1000;
     
     __weak WXComponent* weakComponent = targetComponent;
+    __weak WXPerformance* weakSelf = self;
+    
     dispatch_async(dispatch_get_main_queue(), ^{
         __strong WXComponent* strongComponent = weakComponent;
-        if (nil == strongComponent) {
-            return;
-        }
-        if(![self _verifyComponent:strongComponent]){
-            return;
-        }
-        self.interactionAddCountRecord++;
+        __strong WXPerformance* strongSelf = weakSelf;
         
-        [self _handleRenderTime:strongComponent withModifyTime:modifyTime];
+        if (nil == strongComponent || nil == strongSelf) {
+            return;
+        }
+        
+        if(![strongSelf _verifyComponent:strongComponent]){
+            return;
+        }
+        strongSelf.interactionAddCountRecord++;
+        [strongSelf _handleRenderTime:strongComponent withModifyTime:modifyTime];
     });
 }
 
 - (void) _handleRenderTime:(WXComponent*)targetComponent withModifyTime:(double)modifyTime
 {
     if (nil == targetComponent) {
-        return;
-    }
-    if (targetComponent.ignoreInteraction) {
         return;
     }
     double diff = modifyTime - self.renderTimeOrigin;
@@ -106,27 +113,34 @@
     if ([targetComponent.type isEqualToString:@"videoplus"]) {
         return;
     }
-    
+
     bool inScreen = CGRectIntersectsRect(rootFrame, absoluteFrame);
     if (!inScreen) {
         return;
     }
     
-#ifdef DEBUG
-    WXLogDebug(@"onElementChange _-> size, count :%f,inScreen:%d, type:%@,attr:%@",
-          self.interactionAddCountRecord,
-          inScreen,
-          targetComponent.type,
-          targetComponent.attributes
-          );
-#endif
     if (!targetComponent.weexInstance.apmInstance.hasRecordFirstInterationView) {
         targetComponent.weexInstance.apmInstance.hasRecordFirstInterationView = YES;
         [targetComponent.weexInstance.apmInstance onStage:KEY_PAGE_STAGES_FIRST_INTERACTION_VIEW];
     }
+    [WXAnalyzerCenter transferInteractionInfo:targetComponent];
     [targetComponent.weexInstance.apmInstance onStage:KEY_PAGE_STAGES_INTERACTION];
     self.interactionLimitAddOpCount++;
     self.interactionAddCount = self.interactionAddCountRecord;
+    [targetComponent.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_I_SCREEN_VIEW_COUNT curMaxValue:self.interactionLimitAddOpCount];
+    [targetComponent.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_I_ALL_VIEW_COUNT curMaxValue:self.interactionAddCount];
+    [targetComponent.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_EXECUTE_JS_TIME curMaxValue:self.callJsTime];
+    [targetComponent.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_CREATE_COMPONENT_TIME curMaxValue:self.componentCreateTime];
+    [targetComponent.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_CREATE_VIEW_TIME curMaxValue:self.viewCreateTime];
+    __weak WXComponent* weakComponent = targetComponent;
+    WXPerformBlockOnComponentThread(^{
+         __strong WXComponent* strongComponent = weakComponent;
+        if (!strongComponent) {
+            return;
+        }
+        [strongComponent.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_LAYOUT_TIME curMaxValue:[WXCoreBridge getLayoutTime:strongComponent.weexInstance.instanceId]];
+    });
+
     self.interactionTime = self.interactionTime < diff ? diff :self.interactionTime;
 }
 
@@ -189,8 +203,8 @@
     [WXMonitor performanceFinishWithState:DebugAfterFSFinish instance:self];
     self.performance.jsCreateFinishTime =  CACurrentMediaTime()*1000;
     self.isJSCreateFinish = TRUE;
-    WX_MONITOR_PERF_SET(WXPTFsCallJsNum, self.performance.fsCallJsNum, self);
-    WX_MONITOR_PERF_SET(WXPTFsCallJsTime, self.performance.fsCallJsTime, self);
+    WX_MONITOR_PERF_SET(WXPTFsCallJsNum, self.performance.callJsNum, self);
+    WX_MONITOR_PERF_SET(WXPTFsCallJsTime, self.performance.callJsTime, self);
     WX_MONITOR_PERF_SET(WXPTFsCallNativeNum, self.performance.fsCallNativeNum, self);
     WX_MONITOR_PERF_SET(WXPTFsCallNativeTime, self.performance.fsCallNativeTime, self);
     WX_MONITOR_PERF_SET(WXPTFsReqNetNum, self.performance.fsReqNetNum, self);

@@ -26,8 +26,10 @@ import android.text.TextUtils;
 import com.taobao.weex.adapter.ClassLoaderAdapter;
 import com.taobao.weex.adapter.DefaultUriAdapter;
 import com.taobao.weex.adapter.DefaultWXHttpAdapter;
+import com.taobao.weex.adapter.IWXConfigAdapter;
 import com.taobao.weex.adapter.ICrashInfoReporter;
 import com.taobao.weex.adapter.IDrawableLoader;
+import com.taobao.weex.adapter.IWXJscProcessManager;
 import com.taobao.weex.adapter.ITracingAdapter;
 import com.taobao.weex.adapter.IWXAccessibilityRoleAdapter;
 import com.taobao.weex.adapter.IWXHttpAdapter;
@@ -50,6 +52,7 @@ import com.taobao.weex.common.WXRefreshData;
 import com.taobao.weex.common.WXRuntimeException;
 import com.taobao.weex.common.WXThread;
 import com.taobao.weex.common.WXWorkThreadManager;
+import com.taobao.weex.font.FontAdapter;
 import com.taobao.weex.performance.IApmGenerator;
 import com.taobao.weex.performance.IWXAnalyzer;
 import com.taobao.weex.ui.WXRenderManager;
@@ -61,6 +64,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -89,6 +93,7 @@ public class WXSDKManager {
 
   private IWXJSExceptionAdapter mIWXJSExceptionAdapter;
 
+  private IWXConfigAdapter mConfigAdapter;
   private IWXStorageAdapter mIWXStorageAdapter;
   private IWXStatisticsListener mStatisticsListener;
   private URIAdapter mURIAdapter;
@@ -96,6 +101,7 @@ public class WXSDKManager {
   private IWebSocketAdapterFactory mIWebSocketAdapterFactory;
   private ITracingAdapter mTracingAdapter;
   private WXValidateProcessor mWXValidateProcessor;
+  private IWXJscProcessManager mWXJscProcessManager;
   // Tell weexv8 to initialize v8, default is true.
   private boolean mNeedInitV8 = true;
 
@@ -114,7 +120,7 @@ public class WXSDKManager {
     mWXRenderManager = renderManager;
     mBridgeManager = WXBridgeManager.getInstance();
     mWXWorkThreadManager = new WXWorkThreadManager();
-    mWXAnalyzerList = new ArrayList<>();
+    mWXAnalyzerList = new CopyOnWriteArrayList<>();
     mAllInstanceMap = new HashMap<>();
   }
 
@@ -209,9 +215,19 @@ public class WXSDKManager {
   public WXRenderManager getWXRenderManager() {
     return mWXRenderManager;
   }
-
+  public IWXJscProcessManager getWXJscProcessManager() {
+    return mWXJscProcessManager;
+  }
   public WXWorkThreadManager getWXWorkThreadManager() {
     return mWXWorkThreadManager;
+  }
+
+  public void setWxConfigAdapter(IWXConfigAdapter mConfigAdapter) {
+    this.mConfigAdapter = mConfigAdapter;
+  }
+
+  public IWXConfigAdapter getWxConfigAdapter() {
+    return mConfigAdapter;
   }
 
   public @Nullable WXSDKInstance getSDKInstance(String instanceId) {
@@ -221,7 +237,6 @@ public class WXSDKManager {
   public void postOnUiThread(Runnable runnable, long delayMillis) {
     mWXRenderManager.postOnUiThread(WXThread.secure(runnable), delayMillis);
   }
-
   public Map<String, WXSDKInstance> getAllInstanceMap() {
     return mAllInstanceMap;
   }
@@ -399,6 +414,7 @@ public class WXSDKManager {
     this.mClassLoaderAdapter = config.getClassLoaderAdapter();
     this.mApmGenerater = config.getApmGenerater();
     this.mWXJsFileLoaderAdapter = config.getJsFileLoaderAdapter();
+    this.mWXJscProcessManager = config.getJscProcessManager();
   }
 
   public IWXStorageAdapter getIWXStorageAdapter(){
@@ -506,5 +522,19 @@ public class WXSDKManager {
 
   public void setNavigator(INavigator mNavigator) {
     this.mNavigator = mNavigator;
+  }
+
+
+  private FontAdapter mFontAdapter;
+
+  public FontAdapter getFontAdapter(){
+      if(mFontAdapter == null){
+        synchronized (this){
+          if(mFontAdapter == null){
+              mFontAdapter = new FontAdapter();
+          }
+        }
+      }
+      return mFontAdapter;
   }
 }

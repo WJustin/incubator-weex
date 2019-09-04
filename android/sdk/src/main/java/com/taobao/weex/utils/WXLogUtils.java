@@ -22,7 +22,12 @@ import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Log;
 
+import com.alibaba.fastjson.JSON;
 import com.taobao.weex.WXEnvironment;
+import com.taobao.weex.WXSDKInstance;
+import com.taobao.weex.WXSDKManager;
+import com.taobao.weex.performance.WXStateRecord;
+import com.taobao.weex.utils.tools.LogDetail;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -31,6 +36,8 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+
+import static com.taobao.weex.utils.tools.TimeCalculator.TIMELINE_TAG;
 
 public class WXLogUtils {
 
@@ -72,49 +79,84 @@ public class WXLogUtils {
   }
 
   private static void log(String tag, String msg, LogLevel level){
-    if(msg != null && tag != null && sLogWatcher !=null){
+    if(TextUtils.isEmpty(msg) || TextUtils.isEmpty(tag) || level == null || TextUtils.isEmpty(level.getName())){
+      return;
+    }
+    if (level == LogLevel.ERROR && !TextUtils.isEmpty(msg) && msg.contains("IPCException")){
+      WXStateRecord.getInstance().recordIPCException("ipc",msg);
+    }
+
+    if(sLogWatcher !=null){
       sLogWatcher.onLog(level.getName(), tag, msg);
     }
 
     if (WXEnvironment.isApkDebugable()) {
-      Log.println(level.getPriority(),tag, msg);
-      // if not debug level then print log
-      if(!level.getName().equals("debug")){
+      if(level.getValue() - WXEnvironment.sLogLevel.getValue() >= 0) {
+        Log.println(level.getPriority(), tag, msg);
         writeConsoleLog(level.getName(), msg);
       }
+      // if not debug level then print log
     }else {
-      if(level.getPriority() - LogLevel.WARN.getPriority() >=0){
+      if(level.getValue() - LogLevel.WARN.getValue() >=0 && level.getValue() - WXEnvironment.sLogLevel.getValue() >= 0){
         Log.println(level.getPriority(),tag, msg);
       }
     }
-  }
-
-  public static void d(String msg) {
-    d(WEEX_TAG,msg);
-  }
-
-  public static void i(String msg) {
-    i(WEEX_TAG,msg);
-  }
-
-  public static void info(String msg) {
-    i(WEEX_TAG,msg);
   }
 
   public static void v(String msg) {
     v(WEEX_TAG,msg);
   }
 
+  public static void d(String msg) {
+    d(WEEX_TAG,msg);
+  }
+
+  public static void d(String tag, byte[] msg) {
+    d(tag, new String(msg));
+  }
+
+  public static void i(String msg) {
+    i(WEEX_TAG,msg);
+  }
+
+  public static void i(String tag, byte[] msg) {
+    i(tag, new String(msg));
+  }
+
+  public static void info(String msg) {
+    i(WEEX_TAG, msg);
+  }
+
   public static void w(String msg) {
-    w(WEEX_TAG,msg);
+    w(WEEX_TAG, msg);
+  }
+
+  public static void w(String tag, byte[] msg) {
+    w(tag, new String(msg));
   }
 
   public static void e(String msg) {
     e(WEEX_TAG,msg);
   }
 
-  public static void d(String tag, byte[] msg) {
-    d(tag,new String(msg));
+  public static void e(String tag, byte[] msg) {
+    e(tag, new String(msg));
+  }
+
+  public static void performance(String instanceId, byte[]msg) {
+//    String s = new String(msg);
+//    if(!TextUtils.isEmpty(instanceId)) {
+//      WXSDKInstance sdkInstance = WXSDKManager.getInstance().getSDKInstance(instanceId);
+//      if(sdkInstance != null) {
+//        int i = s.indexOf(",");
+//        if(i >=0 && i < s.length()) {
+//          String substring = s.substring(s.indexOf(",") + 1);
+//          LogDetail logDetail = JSON.parseObject(substring,LogDetail.class);
+//          sdkInstance.mTimeCalculator.addLog(logDetail);
+//        }
+//      }
+//    }
+//    Log.e(TIMELINE_TAG, "from WeexCore" + s);
   }
 
   public static void wtf(String msg){
@@ -140,17 +182,6 @@ public class WXLogUtils {
             } else {
               jsLogWatcher.onJsLog(Log.DEBUG, msg);
             }
-          }
-        }
-
-        /** This log method will be invoked from jni code, so try to extract loglevel from message. **/
-        writeConsoleLog("debug", tag + ":" + msg);
-        if(msg.contains(" | __")){
-          String[] msgs=msg.split(" | __");
-          LogLevel level;
-          if( msgs!=null && msgs.length==4 && !TextUtils.isEmpty(msgs[0]) && !TextUtils.isEmpty(msgs[2])){
-            level=getLogLevel(msgs[2]);
-            return;
           }
         }
       }

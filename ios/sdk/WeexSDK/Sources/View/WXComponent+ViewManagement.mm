@@ -24,7 +24,6 @@
 #import "WXView.h"
 #import "WXSDKInstance_private.h"
 #import "WXTransform.h"
-#import "WXTracingManager.h"
 #import "WXSDKManager.h"
 #import "WXComponent+Layout.h"
 
@@ -156,6 +155,9 @@ do {\
 - (void)viewDidLoad
 {
     WXAssertMainThread();
+    if (self.componentCallback) {
+        self.componentCallback(self, WXComponentViewCreatedCallback, _view);
+    }
 }
 
 - (void)viewWillUnload
@@ -314,7 +316,7 @@ do {\
         [self setNeedsDisplay];
     }
     if (styles && [styles containsObject:@"backgroundImage"]) {
-        _backgroundImage = @"linear-gradient(to left,rgba(255,255,255,0),rgba(255,255,255,0))"; // if backgroundImage is nil, give defalut color value.
+        _backgroundImage = nil;
         [self setGradientLayer];
     }
     
@@ -351,6 +353,27 @@ do {\
     if (self->_isTemplate && self.attributes[@"@templateId"]) {
         [[WXSDKManager bridgeMgr] callComponentHook:self.weexInstance.instanceId componentId:self.attributes[@"@templateId"] type:@"lifecycle" hook:@"detach" args:nil competion:nil];
     }
+    _view = nil;
+    [_layer removeFromSuperlayer];
+    _layer = nil;
+    
+    [self viewDidUnload];
+}
+
+- (void)unloadNativeView
+{
+    WXAssertMainThread();
+    
+    [self viewWillUnload];
+    
+    _view.gestureRecognizers = nil;
+    
+    [self _removeAllEvents];
+    
+    if ([_view superview]) {
+        [_view removeFromSuperview];
+    }
+
     _view = nil;
     [_layer removeFromSuperlayer];
     _layer = nil;

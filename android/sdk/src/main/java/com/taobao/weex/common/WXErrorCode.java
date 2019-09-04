@@ -66,7 +66,7 @@ public enum WXErrorCode {
   /**
    * Failure for executing JavaScript function.
    */
-  WX_ERR_JS_EXECUTE("-2013", "JavaScript execute error!",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
+  WX_ERR_JS_EXECUTE("-2013", "JavaScript execute error!",ErrorType.JS_ERROR,ErrorGroup.JS),
 
 
   /*
@@ -123,6 +123,11 @@ public enum WXErrorCode {
    */
   WX_ERR_RELOAD_PAGE("-2111", "reloadPage",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
 
+  WX_ERR_RELOAD_PAGE_EXCEED_LIMIT("-2114", "RELOAD_PAGE_EXCEED_LIMIT",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
+
+  WX_ERROR_WHITE_SCREEN("-2116", "WHITE_SCREEN",ErrorType.RENDER_ERROR,ErrorGroup.JS),
+
+
   /**
    *
    */
@@ -158,7 +163,7 @@ public enum WXErrorCode {
   /**
    * Single progress init error
    */
-  WX_ERR_SINGLE_PROCESS_DLOPEN_FILE_NOT_EXIST("-1004", "so file is not exist",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
+  WX_ERR_SINGLE_PROCESS_DLOPEN_FILE_NOT_EXIST("-1004", "so file does not exist",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
 
   WX_ERR_SINGLE_PROCESS_DLOPEN_FLAIED("-1005", "dlopen so file failed",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
 
@@ -170,7 +175,7 @@ public enum WXErrorCode {
 
   WX_JS_FRAMEWORK_REINIT_MULPROCESS_FAILED("-1009", "js framework reinit multiProcess failed",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
 
-  WX_JS_FRAMEWORK_INIT_FAILED("-1010", "js framework init  failed",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
+  WX_JS_FRAMEWORK_INIT_FAILED("-1010", "js framework init failed",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
 
   WX_JS_FRAMEWORK_INIT_SINGLE_PROCESS_SUCCESS("-1011", "js framework init success in single process",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
 
@@ -209,7 +214,7 @@ public enum WXErrorCode {
    * renderErrorCode
    */
   WX_RENDER_ERR_JS_CREATE_INSTANCE("-9600", "white screen cause create instance failed,check js stack ->",ErrorType.RENDER_ERROR,ErrorGroup.JS),
-  WX_RENDER_ERR_JS_CREATE_INSTANCE_CONTEXT("-9601", "white screen cause create instanceContext failed,check js stack ->",ErrorType.RENDER_ERROR,ErrorGroup.JS),
+  WX_RENDER_ERR_JS_CREATE_INSTANCE_CONTEXT("-9700", "white screen cause create instanceContext failed,check js stack ->",ErrorType.RENDER_ERROR,ErrorGroup.JS),
   WX_RENDER_ERR_LAYER_OVERFLOW("-9602", "WX_RENDER_ERR_LAYER_OVERFLOW", ErrorType.NATIVE_ERROR, ErrorGroup.NATIVE),
   WX_RENDER_ERR_NULL_KEY("-9603", "WX_RENDER_ERR_NULL_KEY", ErrorType.NATIVE_ERROR, ErrorGroup.NATIVE),
   WX_RENDER_ERR_NATIVE_RUNTIME("-9604", "WX_RENDER_ERR for js error", ErrorType.RENDER_ERROR, ErrorGroup.NATIVE),
@@ -220,8 +225,12 @@ public enum WXErrorCode {
   WX_RENDER_ERR_INSTANCE_ID_NULL("-9618", "WX_RENDER_ERR_INSTANCE_ID_NULL", ErrorType.NATIVE_ERROR, ErrorGroup.NATIVE),
   WX_RENDER_ERR_LIST_INVALID_COLUMN_COUNT("-9619", "WX_RENDER_ERR_LIST_INVALID_COLUMNJ_CONUNT", ErrorType.JS_ERROR, ErrorGroup.JS),
   WX_RENDER_ERR_TEXTURE_SETBACKGROUND("-9620", "WX_RENDER_ERR_TEXTURE_SETBACKGROUND", ErrorType.NATIVE_ERROR, ErrorGroup.NATIVE),
+  WX_RENDER_WAR_GPU_LIMIT_LAYOUT("-9621", "WX_RENDER_WAR_GPU_LIMIT_LAYOUT", ErrorType.JS_ERROR,ErrorGroup.JS),
 
+  WX_KEY_EXCEPTION_HERON("Heron_-9900", "Error of Heron engine: ", ErrorType.NATIVE_ERROR, ErrorGroup.NATIVE),
+  WX_KEY_EXCEPTION_HERON_RENDER("Heron_-9901", "Render error of Heron engine: ", ErrorType.RENDER_ERROR, ErrorGroup.NATIVE),
 
+  WX_KEY_EXCEPTION_NO_BUNDLE_TYPE("-9801", "Fatal Error : No bundle type in js bundle head, cause white screen or memory leak!!", ErrorType.JS_ERROR, ErrorGroup.JS),
   /**
    * degrade code.
    */
@@ -260,6 +269,8 @@ public enum WXErrorCode {
 
 
   WX_DEGRAD_ERR_INSTANCE_CREATE_FAILED_JS("-1006", "degradeToH5|createInstance fail|wx_create_instance_error",ErrorType.DEGRAD_ERROR,ErrorGroup.JS),
+
+  WX_DEGRAD_EAGLE_RENDER_ERROR ("Eagle_-1007", "degradeToH5|eagleRenderErr", ErrorType.DEGRAD_ERROR, ErrorGroup.NATIVE),
 
   WX_ERR_HASH_MAP_TMP("-10010", "WX_ERR_HASH_MAP_TMP",ErrorType.NATIVE_ERROR,ErrorGroup.NATIVE),
 

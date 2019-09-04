@@ -27,8 +27,9 @@ import android.support.annotation.Nullable;
 import android.support.v4.util.LruCache;
 import android.text.TextUtils;
 import com.taobao.weex.WXEnvironment;
+import com.taobao.weex.WXSDKManager;
+import com.taobao.weex.adapter.IWXConfigAdapter;
 import com.taobao.weex.common.Constants;
-import com.taobao.weex.common.WXConfig;
 
 public class WXUtils {
 
@@ -47,7 +48,10 @@ public class WXUtils {
     return Float.isNaN(value);
   }
 
-
+  /**
+   * Use {@link WXViewUtils#getRealPxByWidth(Object, float, int)} instead.
+   */
+  @Deprecated
   public static float getFloatByViewport(Object value, int viewport) {
     if (value == null) {
       return Float.NaN;
@@ -88,11 +92,18 @@ public class WXUtils {
     }
     return Float.NaN;
   }
-
+  /**
+   * Use {@link WXViewUtils#getRealPxByWidth(Object, float, int)} instead.
+   */
+  @Deprecated
   public static float getFloat(Object value) {
     return getFloat(value, Float.NaN);
   }
 
+  /**
+   * Use {@link WXViewUtils#getRealPxByWidth(Object, float, int)} instead.
+   */
+  @Deprecated
   public static Float getFloat(Object value, @Nullable Float df) {
     if (value == null) {
       return df;
@@ -134,7 +145,7 @@ public class WXUtils {
     return df;
   }
 
-  private static float transferWx(String stringWithWXPostfix, int viewport) {
+  static float transferWx(String stringWithWXPostfix, int viewport) {
     if(null == stringWithWXPostfix) {
       return 0;
     }
@@ -143,7 +154,7 @@ public class WXUtils {
       temp = stringWithWXPostfix.substring(0, stringWithWXPostfix.indexOf("wx"));
     }
     Float f = Float.parseFloat(temp);
-    float density = Float.parseFloat(WXEnvironment.getConfig().get(WXConfig.scale));
+    float density = WXEnvironment.sApplication.getResources().getDisplayMetrics().density;
     return density * f * viewport / WXViewUtils.getScreenWidth();
   }
 
@@ -245,7 +256,7 @@ public class WXUtils {
     return getInteger(value, 0);
   }
 
-  public static Integer getInteger(@Nullable Object value, @Nullable Integer df) {
+  public static @Nullable Integer getInteger(@Nullable Object value, @Nullable Integer df) {
 
     if (value == null) {
       return df;
@@ -303,12 +314,14 @@ public class WXUtils {
             }
           }
         } catch (NumberFormatException nfe) {
-          WXLogUtils.e("Argument format error! value is " + value, nfe);
+          if (WXEnvironment.isApkDebugable()) {
+            WXLogUtils.w("The parameter format is not supported", nfe);
+          }
         } catch (Exception e) {
           WXLogUtils.e("Argument error! value is " + value, e);
         }
       }
-      if (!ret.equals(df)) {
+      if (ret != null && !ret.equals(df)) {
         sCache.put(key, ret);
       }
       return ret;
@@ -404,11 +417,12 @@ public class WXUtils {
     return result;
   }
 
+  @Deprecated
   public static boolean isTabletDevice() {
     try{
       return (WXEnvironment.getApplication().getResources().getConfiguration().screenLayout & Configuration.SCREENLAYOUT_SIZE_MASK) >= Configuration.SCREENLAYOUT_SIZE_LARGE;
     }catch (Exception e){
-      WXLogUtils.e("[WXUtils] isTabletDevice:", e);
+      //
     }
     return false;
   }
@@ -429,8 +443,8 @@ public class WXUtils {
     ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
     ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
     am.getMemoryInfo(mi);
-    //mi.availMem; 当前系统的可用内存
-    //return Formatter.formatFileSize(context, mi.availMem);// 将获取的内存大小规格化
+    //mi.availMem;
+    //return Formatter.formatFileSize(context, mi.availMem);
     WXLogUtils.w("app AvailMemory ---->>>"+mi.availMem/(1024*1024));
     return mi.availMem/(1024*1024);
   }
@@ -566,6 +580,22 @@ public class WXUtils {
         return  Integer.parseInt(number);
       }
     }catch (Exception e){return  defaultValue;}
+  }
+
+  public static boolean checkGreyConfig(String group,String key,String defaultValue){
+      IWXConfigAdapter configAdapter = WXSDKManager.getInstance().getWxConfigAdapter();
+      if (null == configAdapter) {
+        return false;
+      }
+      double randomValue = Math.random() * 100;
+      double max = 100;
+      try {
+        String configValue = configAdapter.getConfig(group, key, defaultValue);
+        max = Double.valueOf(configValue);
+      } catch (Exception e) {
+        e.printStackTrace();
+      }
+      return randomValue < max;
   }
 
   private static final long sInterval = System.currentTimeMillis() - SystemClock.uptimeMillis();

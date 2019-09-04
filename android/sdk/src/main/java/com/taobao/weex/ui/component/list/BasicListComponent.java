@@ -18,6 +18,7 @@
  */
 package com.taobao.weex.ui.component.list;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Color;
@@ -174,6 +175,7 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
     stickyHelper = new WXStickyHelper(this);
   }
 
+  @SuppressLint("RtlHardcoded")
   @Override
   public void setMarginsSupportRTL(ViewGroup.MarginLayoutParams lp, int left, int top, int right, int bottom) {
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN_MR1) {
@@ -183,7 +185,7 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
     } else {
       if (lp instanceof FrameLayout.LayoutParams) {
         FrameLayout.LayoutParams lp_frameLayout = (FrameLayout.LayoutParams) lp;
-        if (this.isNativeLayoutRTL()) {
+        if (this.isLayoutRTL()) {
           lp_frameLayout.gravity = Gravity.RIGHT | Gravity.TOP;
           lp.setMargins(right, top, left, bottom);
         } else {
@@ -198,13 +200,8 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
 
   @Override
   public void setLayout(WXComponent component) {
-    if (TextUtils.isEmpty(component.getComponentType())
-            || TextUtils.isEmpty(component.getRef()) || component.getLayoutPosition() == null
-            || component.getLayoutSize() == null) {
-      return;
-    }
     if (component.getHostView() != null) {
-      int layoutDirection = component.isNativeLayoutRTL() ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR;
+      int layoutDirection = component.isLayoutRTL() ? ViewCompat.LAYOUT_DIRECTION_RTL : ViewCompat.LAYOUT_DIRECTION_LTR;
       ViewCompat.setLayoutDirection(component.getHostView(), layoutDirection);
     }
     super.setLayout(component);
@@ -249,7 +246,7 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
    */
   @Override
   protected MeasureOutput measure(int width, int height) {
-    int screenH = WXViewUtils.getScreenHeight(WXEnvironment.sApplication);
+    int screenH = WXViewUtils.getScreenHeight(getInstanceId());
     int weexH = WXViewUtils.getWeexHeight(getInstanceId());
     int outHeight = height > (weexH >= screenH ? screenH : weexH) ? weexH - getAbsoluteY() : height;
     return super.measure(width, outHeight);
@@ -324,7 +321,7 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
       @Override
       public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
         super.onScrollStateChanged(recyclerView, newState);
-
+        getScrollStartEndHelper().onScrollStateChanged(newState);
         List<OnWXScrollListener> listeners = getInstance().getWXScrollListeners();
         int size;
         OnWXScrollListener listener;
@@ -739,9 +736,6 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
       }
       if (isKeepScrollPosition) {
         if(view.getInnerView().getLayoutManager() instanceof  LinearLayoutManager){
-          if(!view.getInnerView().isLayoutFrozen()){ //frozen, prevent layout when scroll
-            view.getInnerView().setLayoutFrozen(true);
-          }
           if(keepPositionCell == null){
             int last=((LinearLayoutManager)view.getInnerView().getLayoutManager()).findLastCompletelyVisibleItemPosition();
             ListBaseViewHolder holder = (ListBaseViewHolder) view.getInnerView().findViewHolderForAdapterPosition(last);
@@ -749,6 +743,9 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
               keepPositionCell = holder.getComponent();
             }
             if(keepPositionCell != null) {
+              if(!view.getInnerView().isLayoutFrozen()){ //frozen, prevent layout when scroll
+                view.getInnerView().setLayoutFrozen(true);
+              }
               if(keepPositionCellRunnable != null){
                 view.removeCallbacks(keepPositionCellRunnable);
               }
@@ -942,6 +939,7 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
         if (anchorComponent != null && anchorComponent.getHostView() != null && !isExcluded) {
           View anchor = anchorComponent.getHostView();
           anchor.setOnTouchListener(new View.OnTouchListener() {
+            @SuppressLint("ClickableViewAccessibility")
             @Override
             public boolean onTouch(View v, MotionEvent event) {
               if (MotionEventCompat.getActionMasked(event) == MotionEvent.ACTION_DOWN) {
@@ -1221,10 +1219,11 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
       if (TextUtils.isEmpty(offset)) {
         offset = "0";
       }
-      float offsetParsed = WXViewUtils.getRealPxByWidth(Integer.parseInt(offset),getInstance().getInstanceViewPortWidth());
 
-      if (offScreenY < offsetParsed) {
 
+      float offsetParsed = WXViewUtils.getRealPxByWidth(WXUtils.getInt(offset),getInstance().getInstanceViewPortWidth());
+
+      if (offScreenY <= offsetParsed && getEvents().contains(Constants.Event.LOADMORE)) {
         if (mListCellCount != mChildren.size()
             || mForceLoadmoreNextTime) {
           fireEvent(Constants.Event.LOADMORE);
@@ -1373,9 +1372,9 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
       }
     }
 
-    Map<String, Object> event = new HashMap<>(2);
-    Map<String, Object> contentSize = new HashMap<>(2);
-    Map<String, Object> contentOffset = new HashMap<>(2);
+    Map<String, Object> event = new HashMap<>(3);
+    Map<String, Object> contentSize = new HashMap<>(3);
+    Map<String, Object> contentOffset = new HashMap<>(3);
 
     contentSize.put(Constants.Name.WIDTH, WXViewUtils.getWebPxByWidth(contentWidth, getInstance().getInstanceViewPortWidth()));
     contentSize.put(Constants.Name.HEIGHT, WXViewUtils.getWebPxByWidth(contentHeight, getInstance().getInstanceViewPortWidth()));
@@ -1384,6 +1383,7 @@ public abstract class BasicListComponent<T extends ViewGroup & ListComponentView
     contentOffset.put(Constants.Name.Y, - WXViewUtils.getWebPxByWidth(offsetY, getInstance().getInstanceViewPortWidth()));
     event.put(Constants.Name.CONTENT_SIZE, contentSize);
     event.put(Constants.Name.CONTENT_OFFSET, contentOffset);
+    event.put(Constants.Name.ISDRAGGING, recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_DRAGGING);
     return event;
   }
 

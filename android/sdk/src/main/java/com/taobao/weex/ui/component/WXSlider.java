@@ -18,6 +18,7 @@
  */
 package com.taobao.weex.ui.component;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.support.annotation.NonNull;
 import android.support.v4.view.ViewPager;
@@ -38,6 +39,7 @@ import com.taobao.weex.common.Constants;
 import com.taobao.weex.dom.WXEvent;
 import com.taobao.weex.ui.ComponentCreator;
 import com.taobao.weex.ui.action.BasicComponentData;
+import com.taobao.weex.ui.view.BaseFrameLayout;
 import com.taobao.weex.ui.view.WXCircleIndicator;
 import com.taobao.weex.ui.view.WXCirclePageAdapter;
 import com.taobao.weex.ui.view.WXCircleViewPager;
@@ -90,7 +92,7 @@ public class WXSlider extends WXVContainer<FrameLayout> {
    */
   protected WXCirclePageAdapter mAdapter;
 
-  protected boolean mShowIndicators;
+  protected boolean mShowIndicators = true;
 
   protected OnPageChangeListener mPageChangeListener = new SliderPageChangeListener();
 
@@ -104,8 +106,8 @@ public class WXSlider extends WXVContainer<FrameLayout> {
   }
 
   @Override
-  protected FrameLayout initComponentHostView(@NonNull Context context) {
-    FrameLayout view = new FrameLayout(context);
+  protected BaseFrameLayout initComponentHostView(@NonNull Context context) {
+    BaseFrameLayout view = new BaseFrameLayout(context);
     // init view pager
     if (getAttrs() != null) {
       Object obj = getAttrs().get(INFINITE);
@@ -214,7 +216,9 @@ public class WXSlider extends WXVContainer<FrameLayout> {
 
   @Override
   public void setLayout(WXComponent component) {
-    mAdapter.setLayoutDirectionRTL(this.isNativeLayoutRTL());
+    if (mAdapter != null) {
+      mAdapter.setLayoutDirectionRTL(this.isLayoutRTL());
+    }
     super.setLayout(component);
   }
 
@@ -261,6 +265,7 @@ public class WXSlider extends WXVContainer<FrameLayout> {
       return;
     }
     mIndicator = indicator;
+    mIndicator.setShowIndicators(mShowIndicators);
     WXCircleIndicator indicatorView = indicator.getHostView();
     if (indicatorView != null) {
       indicatorView.setCircleViewPager(mViewPager);
@@ -289,7 +294,7 @@ public class WXSlider extends WXVContainer<FrameLayout> {
 
     if (mAdapter.getRealCount() > 0) {
       if(idx >= mAdapter.getRealCount()) retIdx = mAdapter.getRealCount() - 1;
-      if (isNativeLayoutRTL()) {
+      if (isLayoutRTL()) {
         retIdx = mAdapter.getRealCount() - 1 - retIdx;
       }
     }
@@ -550,6 +555,7 @@ public class WXSlider extends WXVContainer<FrameLayout> {
     }
   }
 
+  @SuppressLint("ClickableViewAccessibility")
   private void hackTwoItemsInfiniteScroll() {
     if (mViewPager == null || mAdapter == null) {
       return;

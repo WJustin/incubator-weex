@@ -35,17 +35,42 @@
 #import "WXHandlerFactory.h"
 #import "WXValidateProtocol.h"
 #import "WXPrerenderManager.h"
-#import "WXTracingManager.h"
 #import "WXSDKInstance_performance.h"
 #import "WXRootView.h"
 #import "WXComponent+Layout.h"
 #import "WXCoreBridge.h"
 #import "WXComponent_performance.h"
+#import "WXAnalyzerCenter.h"
+#import "WXDisplayLinkManager.h"
 
 static NSThread *WXComponentThread;
 
+/* Task scheduled on component thread and triggered every N display link ticks.
+ If display link is stopped, the tasks are also suspended. */
+@interface WXComponentThreadTickTask : NSObject
+
+@property (nonatomic, assign) NSUInteger displayTickCount; // Triggered every N display link ticks
+@property (nonatomic, copy) dispatch_block_t block;
+
+@end
+
+@implementation WXComponentThreadTickTask
+
++ (instancetype)taskWithBlock:(dispatch_block_t)block tickCount:(NSUInteger)tickCount
+{
+    WXComponentThreadTickTask* task = [[WXComponentThreadTickTask alloc] init];
+    task.displayTickCount = tickCount;
+    task.block = block;
+    return task;
+}
+
+@end
+
 #define WXAssertComponentExist(component)  WXAssert(component, @"component not exists")
 #define MAX_DROP_FRAME_FOR_BATCH   200
+
+@interface WXComponentManager () <WXDisplayLinkClient>
+@end
 
 @implementation WXComponentManager
 {
@@ -59,6 +84,15 @@ static NSThread *WXComponentThread;
     NSMapTable<NSString *, WXComponent *> *_indexDict;
     NSMutableArray<dispatch_block_t> *_uiTaskQueue;
     NSMutableDictionary *_uiPrerenderTaskQueue;
+    
+    NSUInteger _displayTick;
+    NSMutableArray<WXComponentThreadTickTask*> *_displayTaskQueue;
+    
+    // vdom depth and component count statistics
+    NSUInteger _maxVdomDepth;
+    NSUInteger _maxVdomDepthReported;
+    NSUInteger _maxComponentCount;
+    NSUInteger _maxComponentCountReported;
 
     WXComponent *_rootComponent;
     NSMutableArray *_fixedComponents;
@@ -86,6 +120,7 @@ static NSThread *WXComponentThread;
         _indexDict = [NSMapTable strongToWeakObjectsMapTable];
         _fixedComponents = [NSMutableArray wx_mutableArrayUsingWeakReferences];
         _uiTaskQueue = [NSMutableArray array];
+        _displayTaskQueue = [NSMutableArray array];
         _isValid = YES;
         pthread_mutexattr_init(&_propertMutexAttr);
         pthread_mutexattr_settype(&_propertMutexAttr, PTHREAD_MUTEX_RECURSIVE);
@@ -93,6 +128,7 @@ static NSThread *WXComponentThread;
         
         WXPerformBlockOnComponentThread(^{
             // We should ensure that [WXDisplayLinkManager sharedInstance] is only invoked in component thread.
+            [self _addVdomAndComponentCountTask];
             [self _startDisplayLink];
         });
     }
@@ -123,12 +159,7 @@ static NSThread *WXComponentThread;
     dispatch_once(&onceToken, ^{
         WXComponentThread = [[NSThread alloc] initWithTarget:[self sharedManager] selector:@selector(_runLoopThread) object:nil];
         [WXComponentThread setName:WX_COMPONENT_THREAD_NAME];
-        if(WX_SYS_VERSION_GREATER_THAN_OR_EQUAL_TO(@"8.0")) {
-            [WXComponentThread setQualityOfService:[[NSThread mainThread] qualityOfService]];
-        } else {
-            [WXComponentThread setThreadPriority:[[NSThread mainThread] threadPriority]];
-        }
-        
+        [WXComponentThread setQualityOfService:[[NSThread mainThread] qualityOfService]];
         [WXComponentThread start];
     });
     
@@ -243,10 +274,8 @@ static NSThread *WXComponentThread;
             return;
         }
         
-        [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:type phase:WXTracingBegin functionName:@"createBody" options:@{@"threadName":WXTUIThread}];
         strongSelf.weexInstance.rootView.wx_component = strongSelf->_rootComponent;
         [strongSelf.weexInstance.rootView addSubview:strongSelf->_rootComponent.view];
-        [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:type phase:WXTracingEnd functionName:@"createBody" options:@{@"threadName":WXTUIThread}];
     }];
 }
 
@@ -272,6 +301,10 @@ static NSThread *WXComponentThread;
         WXLogWarning(@"addComponent,superRef from js never exit ! check JS action, supRef:%@", parentRef);
         return;
     }
+    if([WXAnalyzerCenter isInteractionLogOpen]){
+         WXLogDebug(@"wxInteractionAnalyzer: [client][addElementStart]%@,%@,%@",supercomponent.weexInstance.instanceId,type,ref);
+    }
+    
     supercomponent.weexInstance.apmInstance.hasAddView = YES;
     
     WXComponent *component = [self _buildComponent:ref type:type supercomponent:supercomponent styles:styles attributes:attributes events:events renderObject:renderObject];
@@ -282,9 +315,16 @@ static NSThread *WXComponentThread;
     }
     if (supercomponent.ignoreInteraction) {
         component.ignoreInteraction = YES;
-    }
-    if ([[component.attributes objectForKey:@"ignoreInteraction"] isEqualToString:@"1"]) {
-        component.ignoreInteraction = YES;
+    } else {
+        if ([attributes objectForKey:@"ignoreInteraction"]) {
+            component.ignoreInteraction = [[attributes objectForKey:@"ignoreInteraction"] boolValue];
+        } else {
+            if (component->_positionType == WXPositionTypeFixed) {
+                component.ignoreInteraction = YES;
+            } else {
+                component.ignoreInteraction = NO;
+            }
+        }
     }
     
 #ifdef DEBUG
@@ -313,7 +353,11 @@ static NSThread *WXComponentThread;
         component->_lazyCreateView = YES;
     }
     
+    // update max vdom depth & component count, and will update apm data on next display task.
     [self recordMaximumVirtualDom:component];
+    if ([_indexDict count] > _maxComponentCount) {
+        _maxComponentCount = [_indexDict count];
+    }
     
     if (!component->_isTemplate) {
         __weak typeof(self) weakSelf = self;
@@ -323,10 +367,11 @@ static NSThread *WXComponentThread;
                 return;
             }
             
-            [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:type phase:WXTracingBegin functionName:@"addElement" options:@{@"threadName":WXTUIThread}];
             [supercomponent insertSubview:component atIndex:index];
-            [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:type phase:WXTracingEnd functionName:@"addElement" options:@{@"threadName":WXTUIThread}];
         }];
+    }
+    if([WXAnalyzerCenter isInteractionLogOpen]){
+        WXLogDebug(@"wxInteractionAnalyzer: [client][addElementEnd]%@,%@,%@",supercomponent.weexInstance.instanceId,type,ref);
     }
 }
 
@@ -349,9 +394,7 @@ static NSThread *WXComponentThread;
             return;
         }
         
-        [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:nil phase:WXTracingBegin functionName:@"moveElement" options:@{@"threadName":WXTUIThread}];
         [component moveToSuperview:newSupercomponent atIndex:index];
-        [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:nil phase:WXTracingEnd functionName:@"moveElement" options:@{@"threadName":WXTUIThread}];
     }];
 }
 
@@ -388,12 +431,10 @@ static NSThread *WXComponentThread;
             return;
         }
         
-        [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:nil phase:WXTracingBegin functionName:@"removeElement" options:@{@"threadName":WXTUIThread}];
         if (component.supercomponent) {
             [component.supercomponent willRemoveSubview:component];
         }
         [component removeFromSuperview];
-        [WXTracingManager startTracingWithInstanceId:weakSelf.weexInstance.instanceId ref:ref className:nil name:nil phase:WXTracingEnd functionName:@"removeElement" options:@{@"threadName":WXTUIThread}];
     }];
     
     [self _checkFixedSubcomponentToRemove:component];
@@ -418,12 +459,14 @@ static NSThread *WXComponentThread;
         maxDeep++;
         component = component.supercomponent;
     }
-    [self.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_MAX_DEEP_DOM curMaxValue:maxDeep];
-    if(maxDeep > [self weexInstance].performance.maxVdomDeep)
-    {
+    
+    if (maxDeep > [self weexInstance].performance.maxVdomDeep) {
         [self weexInstance].performance.maxVdomDeep = maxDeep;
     }
-   
+    
+    if (maxDeep > _maxVdomDepth) {
+        _maxVdomDepth = maxDeep;
+    }
 }
 
 - (void)_checkFixedSubcomponentToRemove:(WXComponent *)component
@@ -496,7 +539,7 @@ static NSThread *WXComponentThread;
     }
     
     Class clazz = NSClassFromString(config.clazz);
-    WXComponent *component = [clazz alloc];
+    WXComponent *component = [[clazz alloc] init];
     if (component) {
         if (renderObject) {
             [component _setRenderObject:renderObject];
@@ -522,6 +565,11 @@ static NSThread *WXComponentThread;
 - (void)addComponent:(WXComponent *)component toIndexDictForRef:(NSString *)ref
 {
     [_indexDict setObject:component forKey:ref];
+}
+
+- (void)removeComponentForRef:(NSString *)ref
+{
+    [_indexDict removeObjectForKey:ref];
 }
 
 - (NSDictionary *)_extractBindings:(NSDictionary **)attributesOrStylesPoint
@@ -646,8 +694,9 @@ static NSThread *WXComponentThread;
     [component _updateStylesOnMainThread:normalStyles resetStyles:resetStyles];
     [component readyToRender];
     
+    NSDictionary* dupStyles = [NSDictionary dictionaryWithDictionary:normalStyles];
     WXPerformBlockOnComponentThread(^{
-        [component _updateStylesOnComponentThread:normalStyles resetStyles:resetStyles isUpdateStyles:isUpdateStyles];
+        [component _updateStylesOnComponentThread:dupStyles resetStyles:resetStyles isUpdateStyles:isUpdateStyles];
     });
 }
 
@@ -663,8 +712,10 @@ static NSThread *WXComponentThread;
     NSMutableArray *resetStyles = [NSMutableArray new];
     [self filterStyles:styles normalStyles:normalStyles resetStyles:resetStyles];
     [component _updateStylesOnComponentThread:normalStyles resetStyles:resetStyles isUpdateStyles:isUpdateStyles];
+    
+    NSDictionary* dupStyles = [NSDictionary dictionaryWithDictionary:normalStyles];
     [self _addUITask:^{
-        [component _updateStylesOnMainThread:normalStyles resetStyles:resetStyles];
+        [component _updateStylesOnMainThread:dupStyles resetStyles:resetStyles];
         [component readyToRender];
     }];
 }
@@ -683,10 +734,8 @@ static NSThread *WXComponentThread;
             return;
         }
         
-        [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:nil phase:WXTracingBegin functionName:@"updateAttrs" options:@{@"threadName":WXTUIThread}];
         [component _updateAttributesOnMainThread:attributes];
         [component readyToRender];
-        [WXTracingManager startTracingWithInstanceId:strongSelf.weexInstance.instanceId ref:ref className:nil name:nil phase:WXTracingEnd functionName:@"updateAttrs" options:@{@"threadName":WXTUIThread}];
     }];
 }
 
@@ -710,22 +759,22 @@ static NSThread *WXComponentThread;
     return [component _hasTransitionPropertyInStyles:styles];
 }
 
-- (void)layoutComponent:(WXComponent*)component frame:(CGRect)frame innerMainSize:(CGFloat)innerMainSize
+- (void)layoutComponent:(WXComponent*)component frame:(CGRect)frame isRTL:(BOOL)isRTL innerMainSize:(CGFloat)innerMainSize
 {
     WXAssertComponentThread();
     WXAssertParam(component);
     
+    [component _setIsLayoutRTL:isRTL];
     if (component == _rootComponent) {
-        if (!CGSizeEqualToSize(frame.size, self.weexInstance.frame.size)) {
-            // Synchronize view frame with root component, especially for content wrap mode.
-            WXPerformBlockOnMainThread(^{
-                if (!self.weexInstance.isRootViewFrozen) {
-                    CGRect rect = self.weexInstance.rootView.frame; // no change of origin
-                    rect.size = frame.size;
-                    self.weexInstance.rootView.frame = rect;
-                }
-            });
-        }
+        // Synchronize view frame with root component, especially for content wrap mode.
+        WXPerformBlockOnMainThread(^{
+            if (!self.weexInstance.isRootViewFrozen &&
+                (!CGSizeEqualToSize(frame.size, self.weexInstance.frame.size) || !CGSizeEqualToSize(frame.size, self.weexInstance.rootView.frame.size))) {
+                CGRect rect = self.weexInstance.rootView.frame; // no change of origin
+                rect.size = frame.size;
+                self.weexInstance.rootView.frame = rect;
+            }
+        });
     }
     
     if ([component _isCalculatedFrameChanged:frame]) {
@@ -871,7 +920,6 @@ static NSThread *WXComponentThread;
         UIView *rootView = instance.rootView;
         [instance.performance onInstanceRenderSuccess:instance];
         if (instance.renderFinish) {
-            [WXTracingManager startTracingWithInstanceId:instance.instanceId ref:nil className:nil name:nil phase:WXTracingInstant functionName:WXTRenderFinish options:@{@"threadName":WXTUIThread}];
             instance.renderFinish(rootView);
         }
     }];
@@ -933,12 +981,32 @@ static NSThread *WXComponentThread;
     return _isValid;
 }
 
-#pragma mark Layout Batch
+#pragma mark Display link task
+
+- (void)_addVdomAndComponentCountTask
+{
+    __weak WXComponentManager* wself = self;
+    [_displayTaskQueue addObject:[WXComponentThreadTickTask taskWithBlock:^{
+        __strong WXComponentManager* sself = wself;
+        if (sself) {
+            if (sself->_maxComponentCount != sself->_maxComponentCountReported) {
+                [sself.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_MAX_COMPONENT_NUM curMaxValue:sself->_maxComponentCount];
+                sself->_maxComponentCountReported = sself->_maxComponentCount;
+            }
+            
+            if (sself->_maxVdomDepth != sself->_maxVdomDepthReported) {
+                [sself.weexInstance.apmInstance updateMaxStats:KEY_PAGE_STATS_MAX_DEEP_DOM curMaxValue:sself->_maxVdomDepth];
+                sself->_maxVdomDepthReported = sself->_maxVdomDepth;
+            }
+        }
+    } tickCount:30 /* triggered about every 500ms */]];
+}
 
 - (void)_startDisplayLink
 {
     WXAssertComponentThread();
     [[WXDisplayLinkManager sharedInstance] registerDisplayClient:self];
+    _displayTick = 0;
 }
 
 - (void)_stopDisplayLink
@@ -951,12 +1019,14 @@ static NSThread *WXComponentThread;
 {
     WXAssertComponentThread();
     _suspend = YES;
+    [self _executeDisplayTask:YES]; // on suspend, executes every task once
 }
 
 - (void)_awakeDisplayLink
 {
     WXAssertComponentThread();
     _suspend = NO;
+    _displayTick = 0;
 }
 
 - (void)_handleDisplayLink
@@ -964,6 +1034,23 @@ static NSThread *WXComponentThread;
     WXAssertComponentThread();
     
     [self _layoutAndSyncUI];
+    
+    if (!_suspend) {
+        // execute tasks in _displayTaskQueue
+        _displayTick ++;
+        [self _executeDisplayTask:NO];
+    }
+}
+
+- (void)_executeDisplayTask:(BOOL)onSuspend
+{
+    for (WXComponentThreadTickTask* task in _displayTaskQueue) {
+        if (onSuspend || (_displayTick % task.displayTickCount == 0)) {
+            if (task.block) {
+                task.block();
+            }
+        }
+    }
 }
 
 - (void)_layoutAndSyncUI
@@ -1016,7 +1103,7 @@ static NSThread *WXComponentThread;
         }
     }
     
-    if (mismatchBeginIndex == _uiTaskQueue.count) {
+    if (mismatchBeginIndex == _uiTaskQueue.count) {//!OCLint
         // here we get end tag or there are not begin and end directives
     } else {
         _syncUITaskCount ++;

@@ -22,9 +22,14 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.Point;
 import android.graphics.RectF;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.LayerDrawable;
 import android.os.Build;
@@ -32,9 +37,13 @@ import android.os.Build.VERSION_CODES;
 import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.text.TextUtils;
+import android.util.DisplayMetrics;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
+import android.view.WindowManager;
+
 import com.taobao.weex.WXEnvironment;
 import com.taobao.weex.WXSDKInstance;
 import com.taobao.weex.WXSDKManager;
@@ -156,6 +165,20 @@ public class WXViewUtils {
     return Constants.Value.DENSITY;
   }
 
+  public static void updateApplicationScreen(Context context){
+    if(context == null || WXEnvironment.sApplication == null){
+        return;
+    }
+    DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+    DisplayMetrics displayMetrics = WXEnvironment.sApplication.getResources().getDisplayMetrics();
+    displayMetrics.heightPixels = metrics.heightPixels;
+    displayMetrics.widthPixels = metrics.widthPixels;
+    displayMetrics.density = metrics.density;
+    displayMetrics.densityDpi = metrics.densityDpi;
+    displayMetrics.scaledDensity = metrics.scaledDensity;
+    displayMetrics.xdpi = metrics.xdpi;
+  }
+
   public static int getScreenWidth(Context ctx) {
     if(ctx!=null){
       Resources res = ctx.getResources();
@@ -173,15 +196,58 @@ public class WXViewUtils {
   }
 
 
+  public static int getStatusBarHeight(Context context){
+      Resources resources = context.getResources();
+      int resourceId = resources.getIdentifier("status_bar_height", "dimen", "android");
+      if (resourceId > 0) {
+        int statusBarHeight = resources.getDimensionPixelSize(resourceId);
+        return statusBarHeight;
+      }
+      return -1;
+  }
+
+
   @Deprecated
   public static int getScreenHeight() {
     return getScreenHeight(WXEnvironment.sApplication);
   }
 
+
+  public static int getScreenHeight(String instanceId){
+    WXSDKInstance instance = WXSDKManager.getInstance().getSDKInstance(instanceId);
+    return instance.isFullScreenHeightEnabled()?getFullScreenHeight(WXEnvironment.sApplication):getScreenHeight(WXEnvironment.sApplication);
+  }
+
+//get screen height with status bar on full screen
+  public static int getFullScreenHeight(Context cxt) {
+    if(cxt!=null){
+      WindowManager wm;
+      Resources res = cxt.getResources();
+      if(Build.VERSION.SDK_INT >= 17 && (wm = (WindowManager)cxt.getSystemService(Context.WINDOW_SERVICE)) != null
+              && wm.getDefaultDisplay() != null){
+        Point size = new Point();
+        wm.getDefaultDisplay().getRealSize(size);
+        mScreenHeight = size.y;
+      }
+      else {
+        mScreenHeight = cxt.getResources().getDisplayMetrics().heightPixels;
+      }
+      if(WXEnvironment.SETTING_FORCE_VERTICAL_SCREEN){
+        mScreenWidth = res
+                .getDisplayMetrics()
+                .widthPixels;
+        mScreenHeight = mScreenHeight > mScreenWidth ? mScreenHeight : mScreenWidth;
+      }
+    } else if (WXEnvironment.isApkDebugable()){
+      throw new WXRuntimeException("Error Context is null When getScreenHeight");
+    }
+    return mScreenHeight;
+  }
+//  get screen height without status bar
   public static int getScreenHeight(Context cxt) {
     if(cxt!=null){
       Resources res = cxt.getResources();
-      mScreenHeight =cxt.getResources().getDisplayMetrics().heightPixels;
+      mScreenHeight = res.getDisplayMetrics().heightPixels;
       if(WXEnvironment.SETTING_FORCE_VERTICAL_SCREEN){
         mScreenWidth = res
                 .getDisplayMetrics()
@@ -194,6 +260,7 @@ public class WXViewUtils {
     return mScreenHeight;
   }
 
+
   /**
    * Convert distance from JS,CSS to native. As the JS considers the width of the screen is 750px.
    * There must be a transform when accessing distance from JS,CSS and use it.
@@ -203,10 +270,19 @@ public class WXViewUtils {
    * @return the actual distance in the screen.
    */
 
+
+  /**
+   * Use {@link WXViewUtils#getRealPxByWidth(Object, float, int)} instead.
+   */
   @Deprecated
   public static float getRealPxByWidth(float pxValue) {
     return getRealPxByWidth(pxValue,750);
   }
+
+  /**
+   * Use {@link WXViewUtils#getRealPxByWidth(Object, float, int)} instead.
+   */
+  @Deprecated
   public static float getRealPxByWidth(float pxValue,int customViewport) {
     if (Float.isNaN(pxValue)) {
       return pxValue;
@@ -218,6 +294,42 @@ public class WXViewUtils {
       return realPx > 0.005 && realPx < 1 ? 1 : (float) Math.rint(realPx);
     }
   }
+    public static float getRealPxByWidth(Object value, float df, int customViewport) {
+        Float pxValue = df;
+        if (value == null) {
+            return df;
+        }
+        String temp = value.toString().trim();
+        if (Constants.Name.AUTO.equals(temp)
+                || Constants.Name.UNDEFINED.equals(temp)
+                || TextUtils.isEmpty(temp)) {
+            WXLogUtils.e("Argument Warning ! value is " + temp + "And default Value:" + df);
+            return df;
+        }
+        try {
+            if (temp.endsWith("wx")) {
+                pxValue = WXUtils.transferWx(temp, customViewport);
+            } else if (temp.endsWith("px")) {
+                temp = temp.substring(0, temp.indexOf("px"));
+                pxValue = Float.parseFloat(temp);
+            } else {
+                pxValue = Float.parseFloat(temp);
+            }
+        } catch (NumberFormatException nfe) {
+            WXLogUtils.e(WXLogUtils.getStackTrace(nfe));
+        } catch (Exception e) {
+            WXLogUtils.e(WXLogUtils.getStackTrace(e));
+        }
+        if (mUseWebPx) {
+            return (float) Math.rint(pxValue);
+        } else {
+            float realPx = (pxValue * getScreenWidth() / customViewport);
+            return realPx > 0.005 && realPx < 1 ? 1 : (float) Math.rint(realPx);
+        }
+    }
+    public static float getRealPxByWidth(Object value,int customViewport) {
+        return getRealPxByWidth(value,Float.NaN,customViewport);
+    }
 
   @Deprecated
   public static float getRealSubPxByWidth(float pxValue) {
@@ -492,6 +604,40 @@ public class WXViewUtils {
           return false;
         }
       }
+    }
+    return true;
+  }
+
+  public static boolean isViewVisible(View v) {
+    if (null == v){
+      return false;
+    }
+
+    boolean isAttachToWindow = Build.VERSION.SDK_INT >= VERSION_CODES.KITKAT
+        ?v.isAttachedToWindow()
+        :v.getWindowToken() != null;
+
+    if (!isAttachToWindow){
+      return false;
+    }
+    if (v.getVisibility() != View.VISIBLE || v.getAlpha()<=0){
+      return false;
+    }
+
+    Drawable bacDrawable = v.getBackground();
+    if (null == bacDrawable){
+      return true;
+    }
+    if (Build.VERSION.SDK_INT >= VERSION_CODES.KITKAT){
+      return bacDrawable.getAlpha()>0;
+    }
+    //< 4.4
+    if (bacDrawable instanceof ColorDrawable){
+      int alpha = Color.alpha(((ColorDrawable) bacDrawable).getColor());
+      return alpha >0;
+    }else if (bacDrawable instanceof BitmapDrawable){
+      Paint paint = ((BitmapDrawable) bacDrawable).getPaint();
+      return paint.getAlpha() > 0;
     }
     return true;
   }

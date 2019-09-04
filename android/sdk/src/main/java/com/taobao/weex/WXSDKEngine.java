@@ -18,13 +18,14 @@
  */
 package com.taobao.weex;
 
+import static com.taobao.weex.WXEnvironment.CORE_SO_NAME;
+
 import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Resources;
 import android.support.v4.content.LocalBroadcastManager;
 import android.text.TextUtils;
-
 import com.taobao.weex.adapter.IDrawableLoader;
 import com.taobao.weex.adapter.IWXHttpAdapter;
 import com.taobao.weex.adapter.IWXImgLoaderAdapter;
@@ -49,8 +50,8 @@ import com.taobao.weex.common.WXErrorCode;
 import com.taobao.weex.common.WXException;
 import com.taobao.weex.common.WXInstanceWrap;
 import com.taobao.weex.common.WXModule;
-import com.taobao.weex.common.WXPerformance;
 import com.taobao.weex.http.WXStreamModule;
+import com.taobao.weex.performance.WXStateRecord;
 import com.taobao.weex.ui.ExternalLoaderComponentHolder;
 import com.taobao.weex.ui.IExternalComponentGetter;
 import com.taobao.weex.ui.IExternalModuleGetter;
@@ -83,7 +84,10 @@ import com.taobao.weex.ui.component.list.SimpleListComponent;
 import com.taobao.weex.ui.component.list.WXCell;
 import com.taobao.weex.ui.component.list.WXListComponent;
 import com.taobao.weex.ui.component.list.template.WXRecyclerTemplateList;
+import com.taobao.weex.ui.component.richtext.WXRichText;
 import com.taobao.weex.ui.config.AutoScanConfigRegister;
+import com.taobao.weex.ui.module.WXDeviceInfoModule;
+import com.taobao.weex.ui.module.ConsoleLogModule;
 import com.taobao.weex.ui.module.WXLocaleModule;
 import com.taobao.weex.ui.module.WXMetaModule;
 import com.taobao.weex.ui.module.WXModalUIModule;
@@ -94,12 +98,10 @@ import com.taobao.weex.utils.WXExceptionUtils;
 import com.taobao.weex.utils.WXLogUtils;
 import com.taobao.weex.utils.WXSoInstallMgrSdk;
 import com.taobao.weex.utils.batch.BatchOperationHelper;
-
+import com.taobao.weex.utils.cache.RegisterCache;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
-
-import static com.taobao.weex.WXEnvironment.CORE_SO_NAME;
 
 public class WXSDKEngine implements Serializable {
 
@@ -164,14 +166,10 @@ public class WXSDKEngine implements Serializable {
       }
       long start = System.currentTimeMillis();
       WXEnvironment.sSDKInitStart = start;
-      if(WXEnvironment.isApkDebugable()){
+      if(WXEnvironment.isApkDebugable(application)){
         WXEnvironment.sLogLevel = LogLevel.DEBUG;
       }else{
-        if(WXEnvironment.sApplication != null){
-          WXEnvironment.sLogLevel = LogLevel.WARN;
-        }else {
-          WXLogUtils.e(TAG,"WXEnvironment.sApplication is " + WXEnvironment.sApplication);
-        }
+        WXEnvironment.sLogLevel = LogLevel.WARN;
       }
       doInitInternal(application,config);
       registerApplicationOptions(application);
@@ -211,7 +209,7 @@ public class WXSDKEngine implements Serializable {
     }
     WXEnvironment.JsFrameworkInit = false;
 
-    WXBridgeManager.getInstance().post(new Runnable() {
+    WXBridgeManager.getInstance().postWithName(new Runnable() {
       @Override
       public void run() {
         long start = System.currentTimeMillis();
@@ -223,7 +221,15 @@ public class WXSDKEngine implements Serializable {
         WXSoInstallMgrSdk.init(application,
                 sm.getIWXSoLoaderAdapter(),
                 sm.getWXStatisticsListener());
-        mIsSoInit = WXSoInstallMgrSdk.initSo(V8_SO_NAME, 1, config!=null?config.getUtAdapter():null);
+        final IWXUserTrackAdapter userTrackAdapter= config!=null?config.getUtAdapter():null;
+        final int version = 1;
+        mIsSoInit = WXSoInstallMgrSdk.initSo(V8_SO_NAME, version, userTrackAdapter);
+        WXSoInstallMgrSdk.copyJssRuntimeSo();
+        if(config!=null) {
+          for (String libraryName : config.getNativeLibraryList()) {
+            WXSoInstallMgrSdk.initSo(libraryName, version, userTrackAdapter);
+          }
+        }
         if (!mIsSoInit) {
           WXExceptionUtils.commitCriticalExceptionRT(null,
                   WXErrorCode.WX_KEY_EXCEPTION_SDK_INIT,
@@ -237,7 +243,8 @@ public class WXSDKEngine implements Serializable {
         WXEnvironment.sSDKInitExecuteTime = System.currentTimeMillis() - start;
         WXLogUtils.renderPerformanceLog("SDKInitExecuteTime", WXEnvironment.sSDKInitExecuteTime);
       }
-    });
+    },null,"doInitWeexSdkInternal");
+    WXStateRecord.getInstance().startJSThreadWatchDog();
     register();
   }
 
@@ -330,6 +337,15 @@ public class WXSDKEngine implements Serializable {
               WXBasicComponentType.RECYCLER,
               WXBasicComponentType.WATERFALL);
 
+      registerComponent(
+              new SimpleComponentHolder(
+                      WXRichText.class,
+                      new WXRichText.Creator()
+              ),
+              false,
+              WXBasicComponentType.RICHTEXT
+      );
+
       String simpleList = "simplelist";
       registerComponent(SimpleListComponent.class,false,simpleList);
       registerComponent(WXRecyclerTemplateList.class, false,WXBasicComponentType.RECYCLE_LIST);
@@ -362,10 +378,16 @@ public class WXSDKEngine implements Serializable {
       registerModule("meta", WXMetaModule.class);
       registerModule("webSocket", WebSocketModule.class);
       registerModule("locale", WXLocaleModule.class);
+      registerModule("deviceInfo", WXDeviceInfoModule.class);
+      registerModule("sdk-console-log", ConsoleLogModule.class);
     } catch (WXException e) {
       WXLogUtils.e("[WXSDKEngine] register:", e);
     }
-    AutoScanConfigRegister.doScanConfig();
+
+    if(RegisterCache.getInstance().enableAutoScan()) {
+      AutoScanConfigRegister.doScanConfig();
+    }
+
     batchHelper.flush();
   }
 
@@ -557,6 +579,7 @@ public class WXSDKEngine implements Serializable {
     WXBridgeManager.getInstance().restart();
     WXBridgeManager.getInstance().initScriptsFramework(framework);
 
+    WXServiceManager.reload();
     WXModuleManager.reload();
     WXComponentRegistry.reload();
     WXSDKManager.getInstance().postOnUiThread(new Runnable() {

@@ -52,6 +52,15 @@ public interface IWXBridge extends IWXObject {
    */
   int initFrameworkEnv(String framework, WXParams params, String cacheDir, boolean pieSupport);
 
+
+  /**
+   * Update InitFramework Params
+   * */
+  void updateInitFrameworkParams(String key, String value, String desc);
+
+
+  void setLogType(float type, boolean isPerf);
+
   void refreshInstance(String instanceId, String namespace, String function, WXJSObject[] args);
 
   /**
@@ -148,7 +157,16 @@ public interface IWXBridge extends IWXObject {
   int callUpdateAttrs(String instanceId, String ref,
                       HashMap<String, String> attrs);
 
-  int callLayout(String instanceId, String ref, int top, int bottom, int left, int right, int height, int width, int index);
+  int callAddChildToRichtext(String instanceId, String nodeType, String ref, String parentRef, String richTextRef,
+                             HashMap<String, String> styles, HashMap<String, String> attrs);
+
+  int callRemoveChildFromRichtext(String instanceId, String ref, String parentRef, String richTextRef);
+
+  int callUpdateRichtextStyle(String instanceId, String ref, HashMap<String, String> styles, String parentRef, String richTextRef);
+
+  int callUpdateRichtextChildAttr(String instanceId, String ref, HashMap<String, String> attrs, String parentRef, String richTextRef);
+
+  int callLayout(String instanceId, String ref, int top, int bottom, int left, int right, int height, int width, boolean isRTL, int index);
 
   int callCreateFinish(String instanceId);
 
@@ -188,6 +206,8 @@ public interface IWXBridge extends IWXObject {
 
   void markDirty(String instanceId, String ref, boolean dirty);
 
+  void setDeviceDisplay(String instanceId, float width, float height, float scale);
+
   void registerCoreEnv(String key, String value);
 
   void reportNativeInitStatus(String statusCode, String errorMsg);
@@ -198,6 +218,17 @@ public interface IWXBridge extends IWXObject {
 
   void resetWXBridge(boolean remoteDebug);
 
-  void fireEventOnDataRenderNode(String instanceId, String ref, String type, String data);
+  void setInstanceRenderType(String instanceId, String renderType);
+
+  void removeInstanceRenderType(String instanceId);
+
+  void setPageArgument(String instanceId, String key, String value);
+
+  void setViewPortWidth(String instanceId,float viewPortWidth);
+
+  void reloadPageLayout(String instanceId);
+
+  void setDeviceDisplayOfPage(String instanceId, float width, float height);
+
 
 }

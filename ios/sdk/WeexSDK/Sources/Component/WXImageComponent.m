@@ -406,7 +406,7 @@ WX_EXPORT_METHOD(@selector(save:))
             newURL = [self.placeholdSrc copy];
             WX_REWRITE_URL([self placeholdSrc], WXResourceTypeImage, self.weexInstance)
             NSDictionary* extInfo = @{@"instanceId":[self _safeInstanceId], @"pageURL": self.weexInstance.scriptURL ?: @""};
-            [[self imageLoader] setImageViewWithURL:(UIImageView*)self.view url:[NSURL URLWithString:newURL] placeholderImage:nil options:extInfo progress:nil completed:^(UIImage *image, NSError *error, WXImageLoaderCacheType cacheType, NSURL *imageURL) {
+            [[self imageLoader] setImageViewWithURL:(UIImageView*)self.view url:newURL placeholderImage:nil options:extInfo progress:nil completed:^(UIImage *image, NSError *error, WXImageLoaderCacheType cacheType, NSURL *imageURL) {
                 /* We cannot rely on image library even if we call setImage with placeholer before calling setImage with real url.
                  The placeholder image may be downloaded and decoded after the real url, so finally we show the placeholder image by wrong. */
                 __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -417,7 +417,7 @@ WX_EXPORT_METHOD(@selector(save:))
                         NSString* newURL = [[strongSelf imageSrc] copy];
                         WX_REWRITE_URL([strongSelf imageSrc], WXResourceTypeImage, strongSelf.weexInstance)
                         NSDictionary *userInfo = @{@"imageQuality":@(strongSelf.imageQuality), @"imageSharp":@(strongSelf.imageSharp),  @"blurRadius":@(strongSelf.blurRadius), @"instanceId":[strongSelf _safeInstanceId], @"pageURL": strongSelf.weexInstance.scriptURL ?: @""};
-                        [[strongSelf imageLoader] setImageViewWithURL:imageView url:[NSURL URLWithString:newURL] placeholderImage:nil options:userInfo progress:nil completed:^(UIImage *image, NSError *error, WXImageLoaderCacheType cacheType, NSURL *imageURL) {
+                        [[strongSelf imageLoader] setImageViewWithURL:imageView url:newURL placeholderImage:nil options:userInfo progress:nil completed:^(UIImage *image, NSError *error, WXImageLoaderCacheType cacheType, NSURL *imageURL) {
                             WXLogInfo(@"Image re-requested because placeholder may override main image. %@", imageURL);
                         }];
                     }
@@ -430,7 +430,7 @@ WX_EXPORT_METHOD(@selector(save:))
         }
         WX_REWRITE_URL([self imageSrc], WXResourceTypeImage, self.weexInstance)
         NSDictionary *userInfo = @{@"imageQuality":@(self.imageQuality), @"imageSharp":@(self.imageSharp),  @"blurRadius":@(self.blurRadius), @"instanceId":[self _safeInstanceId], @"pageURL": self.weexInstance.scriptURL ?: @""};
-        [[self imageLoader] setImageViewWithURL:(UIImageView*)self.view url:[NSURL URLWithString:newURL] placeholderImage:nil options:userInfo progress:^(NSInteger receivedSize, NSInteger expectedSize) {
+        [[self imageLoader] setImageViewWithURL:(UIImageView*)self.view url:newURL placeholderImage:nil options:userInfo progress:^(NSInteger receivedSize, NSInteger expectedSize) {
             // progress when loading image
         } completed:^(UIImage *image, NSError *error, WXImageLoaderCacheType cacheType, NSURL *imageURL) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -448,7 +448,7 @@ WX_EXPORT_METHOD(@selector(save:))
                     NSString *newURL = [strongSelf.placeholdSrc copy];
                     WX_REWRITE_URL([strongSelf placeholdSrc], WXResourceTypeImage, strongSelf.weexInstance)
                     [[strongSelf imageLoader] setImageViewWithURL:(UIImageView*)strongSelf.view
-                                                              url:[NSURL URLWithString:newURL]
+                                                              url:newURL
                                                  placeholderImage:nil
                                                           options:@{@"instanceId":[strongSelf _safeInstanceId], @"pageURL": strongSelf.weexInstance.scriptURL ?: @""}
                                                          progress:nil

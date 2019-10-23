@@ -4,7 +4,7 @@ Pod::Spec.new do |s|
 
   s.name         = "WeexSDK"
 
-  s.version      = "0.26.0.2"
+  s.version      = "0.26.0.3"
 
   s.summary      = "WeexSDK Source."
 
@@ -31,14 +31,8 @@ Pod::Spec.new do |s|
   s.platform     = :ios
   s.ios.deployment_target = '9.0'
 
-  # use for public
-  s.source =  {
-      :git => 'https://github.com/WJustin/incubator-weex.git',
-      :tag => #{s.version}
-  }
-
   # use for playground
-  s.source =  { :path => '.' }
+  s.source       = { :git => "https://github.com/WJustin/incubator-weex.git", :tag => "0.26.0.3"}
 
   s.source_files = 'ios/sdk/WeexSDK/Sources/**/*.{h,m,mm,c,cpp,cc}',
                     'weex_core/Source/base/**/*.{h,hpp,m,mm,c,cpp,cc}',
